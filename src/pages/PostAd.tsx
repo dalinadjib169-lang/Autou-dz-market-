@@ -167,8 +167,10 @@ export default function PostAd() {
 
     setLoading(true);
     try {
-      const finalBrand = formData.brand === 'Other' ? formData.customBrand : formData.brand;
-      const finalModel = formData.model === 'Other' ? formData.customModel : formData.model;
+      const finalBrand = (formData.brand === 'Other' ? formData.customBrand : formData.brand).trim() || 'سيارة';
+      const finalModel = (formData.model === 'Other' ? formData.customModel : formData.model).trim() || 'عام';
+      const finalTitle = formData.title.trim() || `${finalBrand} ${finalModel} ${formData.year}`;
+      const finalPrice = Math.max(0, Number(formData.price) || 0);
       const finalEngine = formData.engine === 'Other' ? formData.customEngine : formData.engine;
       const finalGearbox = formData.gearbox === 'Other' ? formData.customGearbox : formData.gearbox;
 
@@ -177,25 +179,26 @@ export default function PostAd() {
 
       const adData = {
         ...formData,
+        title: finalTitle,
         brand: finalBrand,
         model: finalModel,
         engine: finalEngine,
         gearbox: finalGearbox,
-        suspensionRating: Number(formData.suspensionRating),
-        tiresRating: Number(formData.tiresRating),
-        engineRating: Number(formData.engineRating),
-        bodyRating: Number(formData.bodyRating),
-        interiorRating: Number(formData.interiorRating),
-        oilConsumption: formData.oilConsumption,
+        suspensionRating: Number(formData.suspensionRating) || 10,
+        tiresRating: Number(formData.tiresRating) || 10,
+        engineRating: Number(formData.engineRating) || 10,
+        bodyRating: Number(formData.bodyRating) || 10,
+        interiorRating: Number(formData.interiorRating) || 10,
+        oilConsumption: formData.oilConsumption || 'none',
         oilConsumptionPercentage: formData.oilConsumption !== 'none' ? Number(formData.oilConsumptionPercentage) : 0,
-        overheats: formData.overheats,
+        overheats: !!formData.overheats,
         userId: user.uid,
         sellerName: finalSellerName,
-        sellerEmail: user.email,
+        sellerEmail: user.email || '',
         sellerPhone: profile?.phone || user.phoneNumber || '',
-        price: Number(formData.price),
+        price: finalPrice,
         samouni: formData.samouni ? Number(formData.samouni) : null,
-        year: Number(formData.year),
+        year: Number(formData.year) || new Date().getFullYear(),
         mileage: formData.mileage ? Number(formData.mileage) : null,
         images,
       };

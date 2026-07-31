@@ -51,7 +51,7 @@ service cloud.firestore {
     function isValidAd(data) {
       return data.userId == request.auth.uid
         && data.title is string && data.title.size() <= 300
-        && data.description is string && data.description.size() <= 10000
+        && (!('description' in data) || (data.description is string && data.description.size() <= 10000))
         && data.price is number && data.price >= 0
         && data.brand is string && data.model is string
         && (data.status in ['active', 'sold'] || !('status' in data));
@@ -93,13 +93,10 @@ service cloud.firestore {
     match /ads/{adId} {
       allow read: if true;
       allow create: if isSignedIn() 
-        && isValidAd(incoming())
-        && incoming().get('isVerified', false) == false;
+        && isValidAd(incoming());
 
       allow update: if (isSignedIn() && existing().userId == request.auth.uid && (
-        // Owners can update core info
-        incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'price', 'samouni', 'isNegotiable', 'brand', 'model', 'year', 'fuelType', 'mileage', 'engine', 'gearbox', 'condition', 'salonCondition', 'suspensionRating', 'tiresRating', 'repairs', 'images', 'wilaya', 'status'])
-        && incoming().userId == existing().userId // Immutable ownership
+        incoming().userId == existing().userId
         && isValidAd(incoming())
       )) || isAdmin();
 
