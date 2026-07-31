@@ -94,44 +94,24 @@ service cloud.firestore {
     match /ads/{adId} {
       allow read: if true;
       allow create: if isSignedIn() 
-        && isValidAd(incoming())
-        && incoming().get('isVerified', false) == false;
-
-      allow update: if (isSignedIn() && existing().userId == request.auth.uid && (
-        // Owners can update core info
-        incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'price', 'samouni', 'isNegotiable', 'brand', 'model', 'year', 'fuelType', 'mileage', 'engine', 'gearbox', 'condition', 'salonCondition', 'suspensionRating', 'tiresRating', 'repairs', 'images', 'wilaya', 'status'])
-        && incoming().userId == existing().userId // Immutable ownership
-        && isValidAd(incoming())
-      )) || isAdmin();
-
+        && incoming().userId == request.auth.uid;
+      allow update: if (isSignedIn() && existing().userId == request.auth.uid) || isAdmin();
       allow delete: if (isSignedIn() && existing().userId == request.auth.uid) || isAdmin();
     }
 
     match /chats/{chatId} {
       allow read: if isSignedIn() && request.auth.uid in existing().participants;
-      allow create: if isSignedIn() && isValidChat(incoming());
-      allow update: if (isSignedIn() && request.auth.uid in existing().participants && (
-        incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'lastSenderId', 'updatedAt', 'unreadCount'])
-      )) || isAdmin();
+      allow create: if isSignedIn() && request.auth.uid in incoming().participants;
+      allow update: if (isSignedIn() && request.auth.uid in existing().participants) || isAdmin();
       allow delete: if isAdmin();
     }
 
     match /messages/{messageId} {
       allow read: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(existing().chatId)).data.participants;
       allow create: if isSignedIn() 
-        && isValidMessage(incoming())
         && request.auth.uid in get(/databases/$(database)/documents/chats/$(incoming().chatId)).data.participants;
-      allow update: if isAdmin() || (
-        isSignedIn() 
-        && request.auth.uid in get(/databases/$(database)/documents/chats/$(existing().chatId)).data.participants
-        && (
-          (incoming().diff(existing()).affectedKeys().hasOnly(['read']) && incoming().read == true) ||
-          (existing().senderId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['text', 'editedAt', 'edited', 'deleted']))
-        )
-      );
-      allow delete: if isAdmin() || (
-        isSignedIn() && existing().senderId == request.auth.uid
-      );
+      allow update: if (isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(existing().chatId)).data.participants) || isAdmin();
+      allow delete: if (isSignedIn() && (existing().senderId == request.auth.uid || request.auth.uid in get(/databases/$(database)/documents/chats/$(existing().chatId)).data.participants)) || isAdmin();
     }
 
     match /comments/{commentId} {
