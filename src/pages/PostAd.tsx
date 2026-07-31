@@ -177,18 +177,29 @@ export default function PostAd() {
       const sellerName = profile ? `${profile.firstName || ''} ${profile.lastName || ''}`.trim() : '';
       const finalSellerName = sellerName || user.displayName || user.email?.split('@')[0] || 'بائع';
 
-      const adData = {
-        ...formData,
+      const rawAdData = {
         title: finalTitle,
+        description: formData.description || '',
+        price: finalPrice,
+        samouni: formData.samouni ? Number(formData.samouni) : null,
+        isNegotiable: !!formData.isNegotiable,
         brand: finalBrand,
         model: finalModel,
-        engine: finalEngine,
-        gearbox: finalGearbox,
+        year: Number(formData.year) || new Date().getFullYear(),
+        fuelType: formData.fuelType || 'بنزين',
+        mileage: formData.mileage ? Number(formData.mileage) : null,
+        engine: finalEngine || '',
+        gearbox: finalGearbox || 'يدوي (Manuelle)',
+        condition: formData.condition || 'جيدة',
+        interiorRating: Number(formData.interiorRating) || 10,
         suspensionRating: Number(formData.suspensionRating) || 10,
         tiresRating: Number(formData.tiresRating) || 10,
         engineRating: Number(formData.engineRating) || 10,
         bodyRating: Number(formData.bodyRating) || 10,
-        interiorRating: Number(formData.interiorRating) || 10,
+        repairs: formData.repairs || [],
+        wilaya: formData.wilaya || 'الجزائر',
+        showPhone: formData.showPhone !== false,
+        template: formData.template || 'practical',
         oilConsumption: formData.oilConsumption || 'none',
         oilConsumptionPercentage: formData.oilConsumption !== 'none' ? Number(formData.oilConsumptionPercentage) : 0,
         overheats: !!formData.overheats,
@@ -196,12 +207,11 @@ export default function PostAd() {
         sellerName: finalSellerName,
         sellerEmail: user.email || '',
         sellerPhone: profile?.phone || user.phoneNumber || '',
-        price: finalPrice,
-        samouni: formData.samouni ? Number(formData.samouni) : null,
-        year: Number(formData.year) || new Date().getFullYear(),
-        mileage: formData.mileage ? Number(formData.mileage) : null,
-        images,
+        images: images || [],
       };
+
+      // Strip any undefined keys to prevent Firestore payload rejection
+      const adData = JSON.parse(JSON.stringify(rawAdData));
 
       if (editId) {
         await updateDoc(doc(db, 'ads', editId), {

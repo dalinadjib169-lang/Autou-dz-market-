@@ -49,12 +49,7 @@ service cloud.firestore {
     }
 
     function isValidAd(data) {
-      return data.userId == request.auth.uid
-        && data.title is string && data.title.size() <= 300
-        && (!('description' in data) || (data.description is string && data.description.size() <= 10000))
-        && data.price is number && data.price >= 0
-        && data.brand is string && data.model is string
-        && (data.status in ['active', 'sold'] || !('status' in data));
+      return data.userId == request.auth.uid;
     }
 
     function isValidChat(data) {
