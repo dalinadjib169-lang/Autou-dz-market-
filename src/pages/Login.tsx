@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, setPersistence, browserLocalPersistence, browserSessionPersistence } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { Car, Mail, Lock, ArrowLeft, User, Phone, MapPin, Loader2, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { WILAYAS } from '../constants/data';
@@ -27,35 +27,105 @@ export default function Login() {
       await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
       
       if (isRegister) {
-        // If user provided phone but no email, we create a dummy email for Firebase Auth
-        const authEmail = email || `${phone}@marketautodz.com`;
+        const cleanPhone = phone.trim().replace(/\s+/g, '');
+        const cleanEmail = email.trim().toLowerCase();
+        const authEmail = cleanEmail || (cleanPhone ? `${cleanPhone}@marketautodz.com` : '');
+        
+        if (!authEmail) {
+          toast.error('يرجى إدخال البريد الإلكتروني أو رقم الهاتف');
+          setLoading(false);
+          return;
+        }
+
         const result = await createUserWithEmailAndPassword(auth, authEmail, password);
         const user = result.user;
         
         await setDoc(doc(db, 'users', user.uid), {
           uid: user.uid,
-          email: email || '',
-          phone,
-          firstName,
-          lastName,
+          email: authEmail,
+          phone: cleanPhone,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
           wilaya,
           createdAt: serverTimestamp(),
         });
         
         toast.success('تم إنشاء الحساب بنجاح');
+        navigate('/');
       } else {
-        const authEmail = email || `${phone}@marketautodz.com`;
-        await signInWithEmailAndPassword(auth, authEmail, password);
-        toast.success('تم تسجيل الدخول بنجاح');
+        const inputVal = (email || phone).trim();
+        if (!inputVal) {
+          toast.error('يرجى إدخال البريد الإلكتروني أو رقم الهاتف');
+          setLoading(false);
+          return;
+        }
+
+        let candidateEmails: string[] = [];
+
+        if (inputVal.includes('@')) {
+          candidateEmails.push(inputVal.toLowerCase());
+        } else {
+          const cleanPhone = inputVal.replace(/\s+/g, '');
+          
+          // 1. Look up user document in Firestore by phone
+          try {
+            const q = query(collection(db, 'users'), where('phone', '==', cleanPhone));
+            const snap = await getDocs(q);
+            snap.docs.forEach(docSnap => {
+              const uData = docSnap.data();
+              if (uData.email) candidateEmails.push(uData.email);
+            });
+          } catch (err) {
+            console.warn("Phone lookup error:", err);
+          }
+
+          // 2. Fallback dummy phone email
+          candidateEmails.push(`${cleanPhone}@marketautodz.com`);
+
+          // 3. Fallback for master admin email if phone matches
+          if (cleanPhone === '0673831994') {
+            candidateEmails.push('dalinadjib1990@gmail.com');
+          }
+        }
+
+        candidateEmails = Array.from(new Set(candidateEmails));
+
+        let success = false;
+        let lastErr: any = null;
+
+        for (const targetEmail of candidateEmails) {
+          try {
+            await signInWithEmailAndPassword(auth, targetEmail, password);
+            success = true;
+            break;
+          } catch (err: any) {
+            lastErr = err;
+          }
+        }
+
+        if (success) {
+          toast.success('تم تسجيل الدخول بنجاح');
+          navigate('/');
+        } else {
+          throw lastErr || new Error('فشل تسجيل الدخول');
+        }
       }
-      navigate('/');
     } catch (error: any) {
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+      console.error("Auth submit error:", error);
+      const errCode = error?.code || '';
+      if (
+        errCode === 'auth/user-not-found' || 
+        errCode === 'auth/wrong-password' || 
+        errCode === 'auth/invalid-credential' ||
+        errCode === 'auth/invalid-email'
+      ) {
         toast.error('البريد الإلكتروني/رقم الهاتف أو كلمة المرور غير صحيحة');
-      } else if (error.code === 'auth/email-already-in-use') {
+      } else if (errCode === 'auth/email-already-in-use') {
         toast.error('هذا البريد الإلكتروني أو رقم الهاتف مستخدم بالفعل');
+      } else if (errCode === 'auth/weak-password') {
+        toast.error('كلمة المرور ضعيفة جداً (يجب أن تكون 6 أحرف على الأقل)');
       } else {
-        toast.error(error.message || 'حدث خطأ ما');
+        toast.error('حدث خطأ أثناء تسجيل الدخول. يرجى التأكد من البيانات وإعادة المحاولة');
       }
     } finally {
       setLoading(false);

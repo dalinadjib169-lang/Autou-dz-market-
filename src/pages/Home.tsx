@@ -14,10 +14,25 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const q = query(collection(db, 'ads'), orderBy('createdAt', 'desc'), limit(8));
+    const q = query(collection(db, 'ads'), orderBy('createdAt', 'desc'), limit(12));
     const unsubscribe = onSnapshot(q, (snap) => {
-      setLatestAds(snap.docs.map(d => ({ id: d.id, ...d.data() } as Ad)));
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Ad));
+      setLatestAds(docs);
       setLoading(false);
+    }, (err) => {
+      console.warn("Home ads snapshot fallback triggered:", err);
+      // Fallback: fetch without orderBy in case of missing index or timestamp issue
+      const fallbackQ = query(collection(db, 'ads'), limit(20));
+      onSnapshot(fallbackQ, (snap) => {
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Ad));
+        docs.sort((a, b) => {
+          const tA = a.createdAt?.seconds || Date.now() / 1000;
+          const tB = b.createdAt?.seconds || Date.now() / 1000;
+          return tB - tA;
+        });
+        setLatestAds(docs.slice(0, 12));
+        setLoading(false);
+      }, () => setLoading(false));
     });
     return () => unsubscribe();
   }, []);
