@@ -25,8 +25,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Safety timeout: Never keep user stuck on loading screen for more than 2.5 seconds
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 2500);
+
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
+      // Unblock initial loading immediately once Auth state is determined
+      setLoading(false);
+      clearTimeout(safetyTimer);
       
       if (u) {
         try {
@@ -66,10 +74,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         setProfile(null);
       }
-      setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      clearTimeout(safetyTimer);
+    };
   }, []);
 
   const isAdmin = profile?.role === 'admin' || user?.email?.toLowerCase().trim() === "dalinadjib1990@gmail.com";
