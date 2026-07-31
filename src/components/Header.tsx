@@ -1,0 +1,113 @@
+import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Car, User, LogOut, PlusSquare, MessageSquare, Search, Shield, Activity } from 'lucide-react';
+import { auth } from '../lib/firebase';
+import { useAuth } from '../hooks/useAuth';
+import MarketAnalysisPopup from './MarketAnalysisPopup';
+import { LineChart as LineChartIcon } from 'lucide-react';
+
+export default function Header() {
+  const { user, profile, isAdmin } = useAuth();
+  const [showMarketAnalysis, setShowMarketAnalysis] = useState(false);
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await auth.signOut();
+    navigate('/');
+  };
+
+  return (
+    <header className="sticky top-0 z-50 bg-[#0a0a0a]/80 backdrop-blur-lg border-b border-white/10">
+      <div className="max-w-7xl mx-auto px-4 h-20 flex items-center justify-between">
+        <Link to="/" className="flex items-center gap-3 group">
+          <div className="w-12 h-12 bg-brand-green rounded-2xl flex items-center justify-center group-hover:rotate-12 transition-all duration-500 shadow-lg shadow-brand-green/20 border border-white/10">
+            <Car className="text-white" size={28} />
+          </div>
+          <div className="flex flex-col -space-y-1">
+            <span className="text-2xl font-black tracking-tighter leading-none">
+              MARKET<span className="text-brand-green">AUTO</span><span className="text-brand-red">DZ</span>
+            </span>
+            <span className="text-[8px] font-bold text-white/40 uppercase tracking-[0.2em]">الجزائر 🇩🇿 ALGERIA</span>
+          </div>
+        </Link>
+
+        <nav className="hidden md:flex items-center gap-8">
+          <Link to="/" className="text-sm font-medium hover:text-brand-green transition-colors">الرئيسية</Link>
+          <Link to="/search" className="text-sm font-medium hover:text-brand-green transition-colors">البحث</Link>
+          <Link to="/verified" className="text-sm font-medium hover:text-brand-green transition-colors">سيارات موثوقة</Link>
+                    <button 
+            onClick={() => setShowMarketAnalysis(true)}
+            className="flex items-center gap-2 text-sm font-bold text-emerald-400 hover:text-emerald-300 transition-colors drop-shadow-[0_0_8px_rgba(16,185,129,0.5)] bg-emerald-400/10 px-3 py-1.5 rounded-full border border-emerald-400/20 hidden lg:flex"
+          >
+            <LineChartIcon className="w-4 h-4" />
+            تحليل السوق
+          </button>
+          <a 
+             href="https://chat-gpt-emploi.vercel.app/?fbclid=IwcGRvZgNleHRuA2FlbQIxMQBzcnRjBmFwcF9pZA8yNzUyNTQ2OTI1OTgyNzkAAR6hFdfEel-xLQZmdTOSDcD7SM1700ErYvuHdG75jZf3HaCgN15frINNGicFJQ_aem_wFQP2v-eI0txFtI_BFu_Bg" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 text-sm font-bold text-cyan-400 hover:text-cyan-300 transition-colors drop-shadow-[0_0_8px_rgba(34,211,238,0.5)] bg-cyan-400/10 px-3 py-1.5 rounded-full border border-cyan-400/20"
+          >
+            <Activity className="w-4 h-4 animate-pulse" />
+            تشخيص سيارتي
+          </a>
+        </nav>
+
+        <div className="flex items-center gap-2 sm:gap-4">
+          {user ? (
+            <>
+              <button onClick={(e) => { e.preventDefault(); window.dispatchEvent(new CustomEvent('open-chat-bubble')); }} className="p-2 hover:bg-white/5 rounded-full transition-colors relative hidden xs:flex">
+                <MessageSquare size={20} />
+                <span className="absolute top-1 right-1 w-2 h-2 bg-brand-red rounded-full"></span>
+              </button>
+              {isAdmin && (
+                <Link to="/admin" className="flex items-center gap-2 px-3 py-2 bg-brand-green/10 text-brand-green rounded-xl text-[10px] sm:text-xs font-black border border-brand-green/20 hover:bg-brand-green hover:text-white transition-all shadow-lg shadow-brand-green/5">
+                  <Shield size={16} />
+                  <span className="hidden xs:inline">لوحة المسؤول</span>
+                </Link>
+              )}
+              <Link to="/post" className="flex items-center gap-2 btn-primary !py-2 !px-3 sm:!px-6 text-xs sm:text-sm whitespace-nowrap">
+                <PlusSquare size={18} />
+                <span>أضف إعلان</span>
+              </Link>
+              <div className="group relative">
+                <button className="w-10 h-10 rounded-full overflow-hidden border-2 border-white/10 hover:border-brand-green transition-colors">
+                  <img src={profile?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`} alt="Profile" />
+                </button>
+                <div className="absolute left-0 top-full mt-2 w-56 glass-card p-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all shadow-2xl z-[100]">
+                  <div className="px-3 py-3 border-b border-white/5 mb-2">
+                    <p className="text-sm font-bold truncate">{profile?.firstName} {profile?.lastName}</p>
+                    <p className="text-[10px] text-white/40 truncate">{user.email}</p>
+                  </div>
+                  {isAdmin && (
+                    <Link to="/admin" className="flex items-center gap-2 p-2.5 hover:bg-brand-green/10 text-brand-green rounded-lg text-sm transition-colors mb-1">
+                      <Shield size={18} />
+                      لوحة التحكم
+                    </Link>
+                  )}
+                  <Link to="/profile" className="flex items-center gap-2 p-2.5 hover:bg-white/5 rounded-lg text-sm transition-colors">
+                    <User size={18} />
+                    حسابي الشخصي
+                  </Link>
+                  <button onClick={(e) => { e.preventDefault(); window.dispatchEvent(new CustomEvent('open-chat-bubble')); }} className="flex xs:hidden items-center gap-2 w-full p-2.5 hover:bg-white/5 rounded-lg text-sm transition-colors">
+                    <MessageSquare size={18} />
+                    الرسائل
+                  </button>
+                  <button onClick={handleLogout} className="w-full flex items-center gap-2 p-2.5 hover:bg-brand-red/10 text-brand-red rounded-lg text-sm transition-colors mt-1">
+                    <LogOut size={18} />
+                    تسجيل الخروج
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <Link to="/login" className="btn-primary !py-2 !px-6 text-sm">
+              تسجيل الدخول
+            </Link>
+          )}
+        </div>
+      </div>
+      <MarketAnalysisPopup isOpen={showMarketAnalysis} onClose={() => setShowMarketAnalysis(false)} />
+    </header>
+  );
+}

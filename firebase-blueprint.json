@@ -1,0 +1,138 @@
+{
+  "entities": {
+    "user": {
+      "title": "User Profile",
+      "description": "User profile information for the car marketplace.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "wilaya": { "type": "string" },
+        "phone": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "admin"], "description": "User role for access control" },
+        "rating": { "type": "number" },
+        "isVerified": { "type": "boolean" },
+        "showPhone": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "firstName", "lastName", "wilaya"]
+    },
+    "ad": {
+      "title": "Advertisement",
+      "description": "Car advertisement listing.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "sellerName": { "type": "string" },
+        "sellerPhone": { "type": "string" },
+        "showPhone": { "type": "boolean" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "samouni": { "type": "number" },
+        "isNegotiable": { "type": "boolean" },
+        "brand": { "type": "string" },
+        "model": { "type": "string" },
+        "year": { "type": "number" },
+        "fuelType": { "type": "string", "enum": ["بنزين", "ديزل", "غاز", "كهرباء"] },
+        "mileage": { "type": "number" },
+        "engine": { "type": "string" },
+        "gearbox": { "type": "string" },
+        "condition": { "type": "string", "enum": ["ممتازة", "جيدة", "متوسطة", "تحت الوسط"] },
+        "salonCondition": { "type": "string" },
+        "suspensionRating": { "type": "number" },
+        "tiresRating": { "type": "number" },
+        "repairs": { "type": "array", "items": { "type": "string" } },
+        "images": { "type": "array", "items": { "type": "string" } },
+        "wilaya": { "type": "string" },
+        "isVerified": { "type": "boolean" },
+        "template": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "sold"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "views": { "type": "number" }
+      },
+      "required": ["userId", "title", "price", "brand", "model", "year", "fuelType", "wilaya", "status"]
+    },
+    "chat": {
+      "title": "Chat",
+      "description": "A conversation between a buyer and a seller.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "adId": { "type": "string" },
+        "adTitle": { "type": "string" },
+        "adPrice": { "type": "number" },
+        "adSamouni": { "type": "number" },
+        "adWilaya": { "type": "string" },
+        "buyerId": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "buyerName": { "type": "string" },
+        "sellerName": { "type": "string" },
+        "buyerEmail": { "type": "string" },
+        "sellerEmail": { "type": "string" },
+        "lastMessage": { "type": "string" },
+        "lastSenderId": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "unreadCount": { "type": "object", "description": "Map of userId to unread count" }
+      },
+      "required": ["participants", "adId", "updatedAt"]
+    },
+    "message": {
+      "title": "Message",
+      "description": "A single message within a chat.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "chatId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["chatId", "senderId", "text", "createdAt"]
+    },
+    "comment": {
+      "title": "Comment",
+      "description": "A comment on an advertisement.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "adId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["adId", "userId", "userName", "text", "createdAt"]
+    },
+    "security_event": {
+      "title": "Security Event",
+      "description": "Logged security incidents and alerts.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "type": { "type": "string", "enum": ["unauthorized_access", "suspicious_activity", "input_injection_attempt"] },
+        "description": { "type": "string" },
+        "path": { "type": "string" },
+        "userAgent": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "type", "description", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "user", "description": "User profiles" },
+    "/ads/{adId}": { "schema": "ad", "description": "Car advertisements" },
+    "/chats/{chatId}": { "schema": "chat", "description": "Conversations" },
+    "/messages/{messageId}": { "schema": "message", "description": "Chat messages" },
+    "/comments/{commentId}": { "schema": "comment", "description": "Ad comments" },
+    "/security_events/{eventId}": { "schema": "security_event", "description": "Security alerts and logs" }
+  }
+}

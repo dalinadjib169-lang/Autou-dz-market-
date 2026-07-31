@@ -1,0 +1,155 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // DEFAULT DENY
+    // ===============================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ===============================================================
+    // GLOBAL HELPERS
+    // ===============================================================
+    function isSignedIn() { return request.auth != null; }
+    function isEmailVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    
+    function isMasterAdmin() { 
+      return isSignedIn() && 
+             request.auth.token.email.matches('(?i)dalinadjib1990@gmail\\.com');
+    }
+    
+    function isAdmin() { 
+      return isMasterAdmin() || (
+        isSignedIn() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'user') == 'admin'
+      );
+    }
+
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+
+    // ===============================================================
+    // ENTITY VALIDATORS
+    // ===============================================================
+    
+    function isValidUser(data) {
+      return data.uid == request.auth.uid
+        && data.email is string && data.email.size() <= 256
+        && data.firstName is string && data.firstName.size() <= 50
+        && data.lastName is string && data.lastName.size() <= 50
+        && (!('role' in data) || data.role in ['user', 'admin'])
+        && (!('isVerified' in data) || data.isVerified is bool);
+    }
+
+    function isValidAd(data) {
+      return data.userId == request.auth.uid
+        && data.title is string && data.title.size() <= 100
+        && data.description is string && data.description.size() <= 2000
+        && data.price is number && data.price >= 0
+        && data.brand is string && data.model is string
+        && data.status in ['active', 'sold'];
+    }
+
+    function isValidChat(data) {
+      return data.participants is list 
+        && data.participants.size() == 2
+        && request.auth.uid in data.participants;
+    }
+
+    function isValidMessage(data) {
+      return (data.senderId == request.auth.uid || data.senderId == 'AI_EXPERT')
+        && data.text is string && data.text.size() <= 2000
+        && data.chatId is string;
+    }
+
+    // ===============================================================
+    // COLLECTION RULES
+    // ===============================================================
+
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow list: if isAdmin();
+      
+      allow create: if isSignedIn() 
+        && isValidUser(incoming())
+        && incoming().get('role', 'user') == 'user' // Users cannot make themselves admin
+        && incoming().get('isVerified', false) == false; // Users cannot verify themselves
+
+      allow update: if (isSignedIn() && userId == request.auth.uid && (
+        // Prevent changing immutable fields or role/verification
+        incoming().diff(existing()).affectedKeys().hasOnly(['firstName', 'lastName', 'wilaya', 'phone', 'photoURL', 'showPhone'])
+        && isValidUser(incoming())
+      )) || isAdmin();
+
+      allow delete: if isAdmin();
+    }
+
+    match /ads/{adId} {
+      allow read: if true;
+      allow create: if isSignedIn() 
+        && isValidAd(incoming())
+        && incoming().get('isVerified', false) == false;
+
+      allow update: if (isSignedIn() && existing().userId == request.auth.uid && (
+        // Owners can update core info
+        incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'price', 'samouni', 'isNegotiable', 'brand', 'model', 'year', 'fuelType', 'mileage', 'engine', 'gearbox', 'condition', 'salonCondition', 'suspensionRating', 'tiresRating', 'repairs', 'images', 'wilaya', 'status'])
+        && incoming().userId == existing().userId // Immutable ownership
+        && isValidAd(incoming())
+      )) || isAdmin();
+
+      allow delete: if (isSignedIn() && existing().userId == request.auth.uid) || isAdmin();
+    }
+
+    match /chats/{chatId} {
+      allow read: if isSignedIn() && request.auth.uid in existing().participants;
+      allow create: if isSignedIn() && isValidChat(incoming());
+      allow update: if (isSignedIn() && request.auth.uid in existing().participants && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'lastSenderId', 'updatedAt', 'unreadCount'])
+      )) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /messages/{messageId} {
+      allow read: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(existing().chatId)).data.participants;
+      allow create: if isSignedIn() 
+        && isValidMessage(incoming())
+        && request.auth.uid in get(/databases/$(database)/documents/chats/$(incoming().chatId)).data.participants;
+      allow update: if isAdmin() || (
+        isSignedIn() 
+        && request.auth.uid in get(/databases/$(database)/documents/chats/$(existing().chatId)).data.participants
+        && (
+          (incoming().diff(existing()).affectedKeys().hasOnly(['read']) && incoming().read == true) ||
+          (existing().senderId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['text', 'editedAt', 'edited', 'deleted']))
+        )
+      );
+      allow delete: if isAdmin() || (
+        isSignedIn() && existing().senderId == request.auth.uid
+      );
+    }
+
+    match /comments/{commentId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if (isSignedIn() && existing().userId == request.auth.uid) || isAdmin();
+      allow delete: if (isSignedIn() && existing().userId == request.auth.uid) || isAdmin();
+    }
+
+    match /security_events/{eventId} {
+      // Allow admins to see security alerts
+      allow read: if isAdmin();
+      // Allow creation of security events if signed in
+      allow create: if isSignedIn() 
+        && incoming().userId == request.auth.uid
+        && incoming().type in ['unauthorized_access', 'suspicious_activity', 'input_injection_attempt']
+        && incoming().timestamp == request.time;
+      allow update, delete: if false;
+    }
+  }
+}

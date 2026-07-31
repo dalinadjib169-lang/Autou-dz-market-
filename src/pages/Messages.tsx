@@ -1,0 +1,808 @@
+import React, { useState, useEffect } from 'react';
+import { motion } from 'motion/react';
+import { collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, doc, setDoc, getDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { useAuth } from '../hooks/useAuth';
+import { Chat, Message } from '../types';
+import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
+import { Send, User, Search, MoreVertical, Phone, MessageSquare, Volume2, VolumeX, ArrowRight, CheckCircle2, Image as ImageIcon, Trash2, Edit2, X, Loader2, Bot } from 'lucide-react';
+import { toast } from 'sonner';
+import { cn } from '../lib/utils';
+import { useNavigate } from 'react-router-dom';
+import Markdown from 'react-markdown';
+
+import rehypeRaw from 'rehype-raw';
+
+const NOTIFICATION_SOUND = 'https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3';
+
+function AIMessageContent({ text }: { text: string }) {
+  let displayText = text || '';
+  let chartData: any = null;
+
+  const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[1]);
+      if (parsed.repairCosts) {
+        chartData = parsed.repairCosts;
+      }
+      displayText = text.replace(jsonMatch[0], '');
+    } catch (e) {}
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="markdown-body text-white/90 leading-relaxed text-sm">
+        <Markdown rehypePlugins={[rehypeRaw]}>{displayText}</Markdown>
+      </div>
+      {chartData && (
+        <div className="w-full bg-black/40 rounded-xl p-4 md:p-5 border border-white/10 mt-4 shadow-xl">
+          <h4 className="text-base md:text-lg font-bold text-white/90 mb-5 text-center flex items-center justify-center gap-2">
+            <span className="w-6 h-[2px] bg-indigo-500 rounded-full"></span>
+            مصاريف الترقيع المتوقعة
+            <span className="w-6 h-[2px] bg-indigo-500 rounded-full"></span>
+          </h4>
+          <div className="flex flex-col gap-4">
+            {chartData.map((item: any, index: number) => {
+              const maxCost = Math.max(...chartData.map((d: any) => d.cost));
+              const percentage = maxCost > 0 ? (item.cost / maxCost) * 100 : 0;
+              return (
+                <div key={index} className="flex flex-col gap-1.5">
+                  <div className="flex justify-between items-center text-xs md:text-sm font-bold">
+                    <span className="text-white/80">{item.name}</span>
+                    <span className="text-red-400 font-black bg-red-500/10 px-2 py-0.5 rounded text-[11px] md:text-xs">
+                      {item.cost.toLocaleString()} دج
+                    </span>
+                  </div>
+                  <div className="w-full bg-white/5 rounded-full h-2 md:h-2.5 overflow-hidden flex justify-end">
+                    <div 
+                      className="bg-gradient-to-l from-red-500 to-rose-600 rounded-full h-full transition-all duration-1000 relative overflow-hidden"
+                      style={{ width: `${percentage}%` }}
+                    >
+                      <div className="absolute inset-0 bg-white/20 w-full h-full -translate-x-full animate-shimmer"></div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Messages({ isWidget = false, initialChatId }: { isWidget?: boolean, initialChatId?: string | null }) {
+  const { user, profile } = useAuth();
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [activeChat, setActiveChat] = useState<Chat | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [activeAd, setActiveAd] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [profiles, setProfiles] = useState<Record<string, any>>({});
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [assessingCar, setAssessingCar] = useState(false);
+  const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      scrollToBottom();
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    const fetchProfiles = async () => {
+      const uids = new Set<string>();
+      chats.forEach(c => {
+        if (c.participants) {
+          c.participants.forEach(uid => uids.add(uid));
+        }
+      });
+      
+      const newProfiles = { ...profiles };
+      let changed = false;
+      
+      for (const uid of uids) {
+        if (!newProfiles[uid]) {
+          try {
+            const d = await getDoc(doc(db, 'users', uid));
+            if (d.exists()) {
+              newProfiles[uid] = d.data();
+              changed = true;
+            }
+          } catch (e) {
+            console.error('Error fetching profile for', uid, e);
+          }
+        }
+      }
+      
+      if (changed) {
+        setProfiles(newProfiles);
+      }
+    };
+    
+    if (chats.length > 0) {
+      fetchProfiles();
+    }
+  }, [chats]);
+
+  const playNotificationSound = () => {
+    if (soundEnabled) {
+      const audio = new Audio(NOTIFICATION_SOUND);
+      audio.play().catch(e => console.log('Sound play error:', e));
+    }
+  };
+
+  useEffect(() => {
+    if (activeChat?.adId) {
+      const fetchAd = async () => {
+        try {
+          const adSnap = await getDoc(doc(db, 'ads', activeChat.adId));
+          if (adSnap.exists()) {
+            setActiveAd({ id: adSnap.id, ...adSnap.data() });
+          }
+        } catch (error) {
+          console.error('Error fetching ad for chat:', error);
+        }
+      };
+      fetchAd();
+    } else {
+      setActiveAd(null);
+    }
+  }, [activeChat?.adId]);
+
+  useEffect(() => {
+    if (!user) return;
+    // Remove orderBy to avoid index requirements during initial setup
+    const q = query(
+      collection(db, 'chats'), 
+      where('participants', 'array-contains', user.uid)
+    );
+    
+    const unsubChats = onSnapshot(q, (snap) => {
+      console.log('Current User UID:', user.uid);
+      console.log('Chats snapshot received. Count:', snap.size);
+      
+      let updatedChats = snap.docs.map(d => {
+        const data = d.data();
+        console.log('Chat found:', d.id, 'Participants:', data.participants);
+        return { id: d.id, ...data } as Chat;
+      });
+      
+      // Sort in memory instead of Firestore orderBy
+      updatedChats.sort((a, b) => {
+        const getTime = (val: any) => {
+          if (!val) return 0;
+          if (typeof val.toMillis === 'function') return val.toMillis();
+          if (val.seconds) return val.seconds * 1000;
+          return 0;
+        };
+        return getTime(b.updatedAt) - getTime(a.updatedAt);
+      });
+
+      snap.docChanges().forEach((change) => {
+        if (change.type === 'modified') {
+          const data = change.doc.data();
+          if (data.lastMessage && data.updatedAt && data.lastSenderId !== user.uid) {
+            playNotificationSound();
+          }
+        }
+      });
+      
+      setChats(updatedChats);
+      
+      setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'chats');
+      setLoading(false);
+    });
+    return () => unsubChats();
+  }, [user, soundEnabled]);
+
+  useEffect(() => {
+    if (initialChatId && chats.length > 0) {
+      const target = chats.find(c => c.id === initialChatId);
+      if (target && target.id !== activeChat?.id) {
+        setActiveChat(target);
+      }
+    }
+  }, [initialChatId, chats]);
+
+  useEffect(() => {
+    if (!activeChat) {
+      setMessages([]);
+      return;
+    }
+    // Remove orderBy to avoid index requirements
+    const q = query(
+      collection(db, 'messages'), 
+      where('chatId', '==', activeChat.id)
+    );
+    
+    const unsubMessages = onSnapshot(q, (snap) => {
+      let updatedMessages = snap.docs.map(d => ({ id: d.id, ...d.data() } as Message));
+      
+      // Sort in memory
+      updatedMessages.sort((a, b) => {
+        const getTime = (val: any) => {
+          if (!val) return Date.now(); // Assume new messages without timestamps are now
+          if (typeof val.toMillis === 'function') return val.toMillis();
+          if (val.seconds) return val.seconds * 1000;
+          return Date.now();
+        };
+        return getTime(a.createdAt) - getTime(b.createdAt);
+      });
+
+      setMessages(updatedMessages);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'messages');
+    });
+    return () => unsubMessages();
+  }, [activeChat]);
+
+  useEffect(() => {
+    if (activeChat && user) {
+      // Clear unread count for current user
+      const chatRef = doc(db, 'chats', activeChat.id);
+      setDoc(chatRef, {
+        [`unreadCount.${user.uid}`]: 0
+      }, { merge: true }).catch(console.error);
+
+      // Mark messages as read
+      const unreadMessages = messages.filter(m => m.senderId !== user.uid && !m.read);
+      unreadMessages.forEach(m => {
+        setDoc(doc(db, 'messages', m.id), { read: true }, { merge: true }).catch(console.error);
+      });
+    }
+  }, [activeChat, user, messages.length]);
+
+  const handleSendMessage = async (e?: React.FormEvent, textOverride?: string, imageUrl?: string) => {
+    if (e) e.preventDefault();
+    const textToSend = textOverride || newMessage;
+    if (!user || !activeChat || (!textToSend.trim() && !imageUrl)) return;
+    try {
+      const otherUid = activeChat.participants?.find(id => id !== user.uid);
+      
+      await addDoc(collection(db, 'messages'), {
+        chatId: activeChat.id,
+        senderId: user.uid,
+        text: textToSend,
+        imageUrl: imageUrl || null,
+        createdAt: serverTimestamp(),
+        read: false,
+      });
+      
+      // Update chat metadata and increment unread count for other user
+      const chatRef = doc(db, 'chats', activeChat.id);
+      const updateData: any = {
+        lastMessage: imageUrl ? '📷 صورة' : textToSend,
+        lastSenderId: user.uid,
+        updatedAt: serverTimestamp(),
+      };
+      
+      if (otherUid) {
+        updateData[`unreadCount.${otherUid}`] = (activeChat.unreadCount?.[otherUid] || 0) + 1;
+      }
+      
+      await setDoc(chatRef, updateData, { merge: true });
+
+      if (!textOverride) setNewMessage('');
+    } catch (error) {
+      console.error(error);
+      toast.error('فشل إرسال الرسالة');
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    setUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('upload_preset', 'market_auto_dz');
+
+    try {
+      const res = await fetch('https://api.cloudinary.com/v1_1/dcegf2b44/image/upload', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (data.secure_url) {
+        await handleSendMessage(undefined, '', data.secure_url);
+      }
+    } catch (error) {
+      toast.error('فشل رفع الصورة');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDeleteMessage = async (msgId: string) => {
+    if (!window.confirm('هل أنت متأكد من حذف هذه الرسالة؟')) return;
+    try {
+      await setDoc(doc(db, 'messages', msgId), { deleted: true, text: 'تم حذف هذه الرسالة' }, { merge: true });
+      toast.success('تم حذف الرسالة');
+    } catch (error) {
+      toast.error('فشل حذف الرسالة');
+    }
+  };
+
+  const handleEditMessage = async (msgId: string) => {
+    if (!editText.trim()) return;
+    try {
+      await setDoc(doc(db, 'messages', msgId), { text: editText, edited: true }, { merge: true });
+      setEditingMessageId(null);
+      setEditText('');
+      toast.success('تم تعديل الرسالة');
+    } catch (error) {
+      toast.error('فشل تعديل الرسالة');
+    }
+  };
+
+  const handleAIAssessment = async () => {
+    if (!activeAd || !activeChat || !user) {
+      toast.error('لا يمكن تقييم السيارة الآن');
+      return;
+    }
+    setAssessingCar(true);
+    const loadingToast = toast.loading('الخبير الآلي يحلل السيارة والسوق...');
+    try {
+      const isBuyer = user.uid === activeChat.buyerId;
+      const role = isBuyer ? 'buyer' : 'seller';
+      
+      const response = await fetch('/api/gemini/assess-car', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adDetails: activeAd,
+          role,
+          userMessage: 'أعطنا رأيك كخبير محايد في هذه السيارة وهذا السعر بناءً على خبرتك في السوق الجزائري، وحدد سعراً عادلاً للبائع والمشتري.',
+        })
+      });
+
+      if (!response.ok) {
+        let errMsg = 'فشل التقييم';
+        try {
+          const errData = await response.json();
+          if (errData.error) errMsg = errData.error;
+        } catch(e) {}
+        throw new Error(errMsg);
+      }
+      const data = await response.json();
+      
+      await addDoc(collection(db, 'messages'), {
+        chatId: activeChat.id,
+        senderId: 'AI_EXPERT',
+        text: data.reply,
+        createdAt: serverTimestamp(),
+        read: false,
+      });
+
+      const chatRef = doc(db, 'chats', activeChat.id);
+      const otherUid = activeChat.participants?.find(id => id !== user.uid);
+      const updateData: any = {
+        lastMessage: '🤖 تقييم الخبير الآلي',
+        lastSenderId: 'AI_EXPERT',
+        updatedAt: serverTimestamp(),
+      };
+      if (otherUid) updateData[`unreadCount.${otherUid}`] = (activeChat.unreadCount?.[otherUid] || 0) + 1;
+      
+      await setDoc(chatRef, updateData, { merge: true });
+      toast.success('تم إضافة تقييم الخبير', { id: loadingToast });
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error.message || 'حدث خطأ أثناء الاتصال بالخبير الآلي', { id: loadingToast });
+    } finally {
+      setAssessingCar(false);
+    }
+  };
+
+  const QUICK_REPLIES = [
+    'كم السعر؟',
+    'واش فيها معاود؟ (الطلاء)',
+    'واش من بلاصة انت؟',
+    'كيفاش حالة المحرك؟',
+    'هل السيارة لا تزال متوفرة؟'
+  ];
+
+  if (!user) return null;
+
+  return (
+    <div className={`max-w-7xl w-full mx-auto px-0 md:px-4 ${isWidget ? 'h-full py-0' : 'h-[calc(100dvh-64px)] md:h-[calc(100vh-80px)] py-0 md:py-8'}`}>
+      <div className="glass-card h-full flex overflow-hidden relative rounded-none md:rounded-2xl border-x-0 md:border-x">
+        {/* Sidebar */}
+        <div className={cn(
+          "w-full md:w-80 border-l border-white/10 flex flex-col transition-all duration-300",
+          activeChat ? "hidden md:flex" : "flex"
+        )}>
+          <div className="p-6 border-b border-white/10 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold">الرسائل</h2>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => navigate('/')}
+                  className="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-all text-white/40 hover:text-white"
+                  title="إغلاق"
+                >
+                  <X size={18} />
+                </button>
+                <button 
+                  onClick={() => setSoundEnabled(!soundEnabled)}
+                  className={cn(
+                    "p-2 rounded-xl transition-all",
+                    soundEnabled ? "bg-brand-green/10 text-brand-green" : "bg-white/5 text-white/20"
+                  )}
+                  title={soundEnabled ? "إيقاف الصوت" : "تفعيل الصوت"}
+                >
+                  {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
+                </button>
+              </div>
+            </div>
+            <div className="relative">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20" size={16} />
+              <input type="text" placeholder="بحث في المحادثات..." className="w-full bg-white/5 border border-white/10 rounded-xl py-2 pr-10 pl-4 text-base outline-none" />
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto no-scrollbar">
+            {loading ? (
+              <div className="p-8 text-center text-white/20">جاري التحميل...</div>
+            ) : chats.map(chat => (
+              <button
+                key={chat.id}
+                onClick={() => setActiveChat(chat)}
+                className={cn(
+                  "w-full p-4 flex items-center gap-4 hover:bg-white/5 transition-colors text-right",
+                  activeChat?.id === chat.id && "bg-white/5 border-r-4 border-brand-green"
+                )}
+              >
+                <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center shrink-0 overflow-hidden">
+                  {(() => {
+                    const otherUid = chat.participants?.find(id => id !== user.uid);
+                    const otherProfile = otherUid ? profiles[otherUid] : null;
+                    if (otherProfile?.photoURL) {
+                      return <img src={otherProfile.photoURL} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />;
+                    }
+                    return <User size={24} className="text-white/40" />;
+                  })()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="font-bold text-sm truncate">
+                      {(() => {
+                        const otherUid = chat.participants?.find(id => id !== user.uid);
+                        const otherProfile = otherUid ? profiles[otherUid] : null;
+                        
+                        if (otherProfile) {
+                          return `${otherProfile.firstName || ''} ${otherProfile.lastName || ''}`.trim() || otherProfile.displayName || otherProfile.email?.split('@')[0];
+                        }
+
+                        const isBuyer = user.uid === chat.buyerId;
+                        const otherName = isBuyer ? chat.sellerName : chat.buyerName;
+                        const otherEmail = isBuyer ? chat.sellerEmail : chat.buyerEmail;
+                        
+                        if (otherName && !otherName.includes('undefined')) return otherName;
+                        if (otherEmail) return otherEmail.split('@')[0];
+                        return isBuyer ? 'بائع' : 'مشتري';
+                      })()}
+                    </span>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="text-[10px] text-white/20">
+                        {(() => {
+                          const val = chat.updatedAt;
+                          if (!val) return '';
+                          const date = typeof val.toDate === 'function' ? val.toDate() : (val.seconds ? new Date(val.seconds * 1000) : null);
+                          return date ? date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+                        })()}
+                      </span>
+                      {chat.unreadCount?.[user.uid] > 0 && (
+                        <span className="bg-brand-green text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                          {chat.unreadCount[user.uid]}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 mt-1">
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      {(chat.adImage || activeAd?.images?.[0]) && (
+                        <img src={chat.adImage || activeAd?.images?.[0]} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0" />
+                      )}
+                      <p className="text-[10px] text-brand-green font-bold truncate flex-1">{chat.adTitle}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      {chat.adPrice && <span className="text-[9px] text-emerald-400 font-bold">{chat.adPrice.toLocaleString()} دج</span>}
+                      {chat.adSamouni && <span className="text-[9px] text-red-500 font-bold">سوموني: {chat.adSamouni.toLocaleString()}</span>}
+                    </div>
+                  </div>
+                  <p className="text-xs text-white/40 truncate mt-1">{chat.lastMessage || 'لا توجد رسائل بعد'}</p>
+                </div>
+              </button>
+            ))}
+            {!loading && chats.length === 0 && (
+              <div className="p-12 text-center text-white/20 text-sm">لا توجد محادثات نشطة</div>
+            )}
+          </div>
+        </div>
+
+        {/* Chat Area */}
+        <div className={cn(
+          "flex-1 flex flex-col transition-all duration-300 relative h-full min-w-0 min-h-0 w-full",
+          !activeChat ? "hidden md:flex" : "flex"
+        )}>
+          {activeChat ? (
+            <div className="flex-1 flex flex-col min-w-0 min-h-0">
+              <div className="p-4 md:p-6 border-b border-white/10 flex items-center justify-between bg-[#0a0a0a]/50 backdrop-blur-md">
+                <div className="flex items-center gap-4">
+                  <button 
+                    onClick={() => setActiveChat(null)}
+                    className="md:hidden p-2 hover:bg-white/5 rounded-lg text-white/40"
+                  >
+                    <ArrowRight size={20} />
+                  </button>
+                  <div className="w-10 h-10 rounded-xl bg-brand-green/10 flex items-center justify-center overflow-hidden shrink-0">
+                    {(() => {
+                      const otherUid = activeChat.participants?.find(id => id !== user.uid);
+                      const otherProfile = otherUid ? profiles[otherUid] : null;
+                      if (otherProfile?.photoURL) {
+                        return <img src={otherProfile.photoURL} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />;
+                      }
+                      return <User size={20} className="text-brand-green" />;
+                    })()}
+                  </div>
+                  <div className="min-w-0 text-right flex-1">
+                    <h3 className="font-bold text-sm truncate">
+                      {(() => {
+                        const otherUid = activeChat.participants?.find(id => id !== user.uid);
+                        const otherProfile = otherUid ? profiles[otherUid] : null;
+                        
+                        if (otherProfile) {
+                          return `${otherProfile.firstName || ''} ${otherProfile.lastName || ''}`.trim() || otherProfile.displayName || otherProfile.email?.split('@')[0];
+                        }
+
+                        const isBuyer = user.uid === activeChat.buyerId;
+                        const otherName = isBuyer ? activeChat.sellerName : activeChat.buyerName;
+                        const otherEmail = isBuyer ? activeChat.sellerEmail : activeChat.buyerEmail;
+                        
+                        if (otherName && !otherName.includes('undefined')) return otherName;
+                        if (otherEmail) return otherEmail.split('@')[0];
+                        return isBuyer ? 'بائع' : 'مشتري';
+                      })()}
+                    </h3>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={async () => {
+                      if (!activeChat || !user) return;
+                      const loadingToast = toast.loading('الخبير الآلي يراجع المحادثة...');
+                      try {
+                        const response = await fetch('/api/gemini/assess-car', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            adDetails: {
+                              title: activeChat.adTitle || 'غير متوفر',
+                              price: activeChat.adPrice || 0,
+                              samouni: activeChat.adSamouni || 0,
+                              wilaya: activeChat.adWilaya || 'غير متوفر'
+                            },
+                            role: 'viewer',
+                            userMessage: 'أعطنا رأيك كخبير محايد في هذه المحادثة بين البائع والمشتري واقترح سعراً يرضي الطرفين.',
+                          })
+                        });
+                  
+                        if (!response.ok) {
+                          let errMsg = 'فشل التقييم';
+                          try {
+                            const errData = await response.json();
+                            if (errData.error) errMsg = errData.error;
+                          } catch(e) {}
+                          throw new Error(errMsg);
+                        }
+                        const data = await response.json();
+                        
+                        await handleSendMessage(undefined, data.reply);
+                        toast.success('تم إرسال رأي الخبير بنجاح', { id: loadingToast });
+                      } catch (error: any) {
+                        console.error(error);
+                        toast.error(error.message || 'حدث خطأ أثناء الاتصال بالخبير الآلي', { id: loadingToast });
+                      }
+                    }}
+                    className="p-2 hover:bg-indigo-500/10 hover:text-indigo-400 rounded-lg transition-colors text-indigo-500 flex items-center gap-2"
+                    title="طلب رأي الخبير الآلي"
+                  >
+                    <Bot size={18} />
+                    <span className="text-xs font-bold hidden md:inline">الخبير الآلي</span>
+                  </button>
+                  <button className="p-2 hover:bg-white/5 rounded-lg transition-colors text-white/40"><Phone size={18} /></button>
+                  <button 
+                    onClick={() => setActiveChat(null)}
+                    className="p-2 hover:bg-red-500/10 hover:text-red-500 rounded-lg transition-colors text-white/40"
+                    title="إغلاق المحادثة"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Ad Banner inside Chat */}
+              <div className="bg-white/5 border-b border-white/10 p-3 flex items-center justify-between gap-4">
+                <div 
+                  className="flex items-center gap-4 hover:opacity-80 transition-opacity cursor-pointer flex-1 min-w-0" 
+                  onClick={() => navigate(`/ad/${activeChat.adId}`)}
+                >
+                  {(activeChat.adImage || activeAd?.images?.[0]) ? (
+                    <img src={activeChat.adImage || activeAd?.images?.[0]} alt={activeChat.adTitle} className="w-20 h-16 rounded-lg object-cover shrink-0" />
+                  ) : (
+                    <div className="w-20 h-16 rounded-lg bg-black/50 flex items-center justify-center shrink-0">
+                       <ImageIcon size={20} className="text-white/20" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0 py-1">
+                    <p className="text-sm font-bold text-brand-green line-clamp-2">{activeChat.adTitle || activeAd?.title}</p>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <span className="text-xs text-emerald-400 font-black">
+                        {(activeChat.adPrice || activeAd?.price)?.toLocaleString() || '---'} دج
+                      </span>
+                      {(activeChat.adSamouni || activeAd?.samouni) && (
+                        <>
+                          <span className="text-[10px] text-white/40">|</span>
+                          <span className="text-xs text-red-500 font-black">
+                            سوموني: {(activeChat.adSamouni || activeAd?.samouni).toLocaleString()}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={handleAIAssessment}
+                  disabled={assessingCar}
+                  className="flex items-center gap-2 bg-gradient-to-l from-indigo-600 to-indigo-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:shadow-[0_0_15px_rgba(79,70,229,0.5)] transition-all shrink-0 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
+                  title="اطلب رأي الخبير الآلي حول السعر والسيارة"
+                >
+                  {assessingCar ? <Loader2 size={14} className="animate-spin" /> : <Bot size={14} />}
+                  <span className="hidden sm:inline">تقييم الذكاء الاصطناعي</span>
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-4 scroll-smooth">
+                {messages.length === 0 && (
+                  <div className="flex flex-col items-center justify-center h-full space-y-6">
+                    <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center">
+                      <MessageSquare size={32} className="text-white/20" />
+                    </div>
+                    <div className="text-center space-y-2">
+                      <p className="text-white/60 font-bold">ابدأ المحادثة الآن</p>
+                      <p className="text-xs text-white/20">استخدم الرسائل السريعة بالأسفل للبدء</p>
+                    </div>
+                  </div>
+                )}
+                {messages.map(msg => {
+                  const isMe = msg.senderId === user.uid;
+                  const isAI = msg.senderId === 'AI_EXPERT';
+                  return (
+                  <div key={msg.id} className={cn(
+                    "flex group relative w-full mb-6 items-end",
+                    isAI ? "justify-center" : (isMe ? "justify-start" : "justify-end")
+                  )}>
+                    <div className="flex flex-col gap-1 max-w-[95%] md:max-w-[85%]">
+                      <div className={cn(
+                        "relative shadow-sm whitespace-pre-wrap leading-relaxed w-fit break-words",
+                        isAI 
+                           ? "bg-[#18181b] text-white rounded-2xl border border-white/10 w-full p-4 md:p-5 shadow-xl" 
+                          : (isMe
+                            ? "bg-brand-green text-white rounded-[18px] rounded-tr-[4px] px-4 py-2.5 text-[15px]" 
+                            : "bg-[#27272a] text-gray-100 rounded-[18px] rounded-tl-[4px] border border-white/5 px-4 py-2.5 text-[15px]")
+                      )}>
+                        {isAI && (
+                          <div className="flex items-center gap-2 mb-3 text-brand-green font-bold border-b border-white/10 pb-2">
+                            <Bot size={16} />
+                            <span>الخبير الآلي (Market Auto DZ)</span>
+                          </div>
+                        )}
+                        {editingMessageId === msg.id ? (
+                          <div className="space-y-2 min-w-[200px]">
+                            <input 
+                              type="text" 
+                              value={editText} 
+                              onChange={(e) => setEditText(e.target.value)}
+                              className="w-full bg-black/20 border border-white/10 rounded-lg p-2 text-base outline-none text-white focus:border-brand-green"
+                              autoFocus
+                            />
+                            <div className="flex justify-end gap-2 mt-2">
+                              <button onClick={() => setEditingMessageId(null)} className="px-3 py-1 text-xs text-white/50 hover:text-white bg-white/5 rounded-md transition-colors">إلغاء</button>
+                              <button onClick={() => handleEditMessage(msg.id)} className="px-3 py-1 text-xs text-white bg-brand-green/80 hover:bg-brand-green rounded-md transition-colors font-medium">حفظ</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            {msg.imageUrl && (
+                              <div className="relative rounded-xl overflow-hidden mb-2 group/image mt-1">
+                                <img src={msg.imageUrl} alt="Sent" className="max-w-[240px] max-h-[300px] object-cover cursor-pointer hover:scale-[1.02] transition-transform duration-300" onClick={() => window.open(msg.imageUrl)} />
+                              </div>
+                            )}
+                            {isAI ? (
+                              <AIMessageContent text={msg.text} />
+                            ) : (
+                              <div className={cn(msg.deleted && "italic text-white/40", "m-0")}>{msg.text}</div>
+                            )}
+                            {msg.edited && !msg.deleted && <span className="text-[10px] text-white/40 block mt-1.5 opacity-70">(معدلة)</span>}
+                          </>
+                        )}
+                        
+                        {isMe && !msg.deleted && (
+                          <div className="absolute -left-12 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-all flex flex-col justify-center gap-1.5 z-10">
+                            <button onClick={() => { setEditingMessageId(msg.id); setEditText(msg.text); }} className="w-8 h-8 flex items-center justify-center bg-[#18181b] border border-white/10 rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-colors shadow-lg shadow-black/20 transform hover:scale-110"><Edit2 size={13} /></button>
+                            <button onClick={() => handleDeleteMessage(msg.id)} className="w-8 h-8 flex items-center justify-center bg-[#18181b] border border-white/10 rounded-full text-white/60 hover:text-red-400 hover:bg-red-500/10 transition-colors shadow-lg shadow-black/20 transform hover:scale-110"><Trash2 size={13} /></button>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {isMe && (
+                        <div className="text-[11px] text-white/40 font-medium flex items-center gap-1.5 pr-1">
+                          <CheckCircle2 size={12} className={cn(msg.read ? "text-brand-green" : "text-white/30")} />
+                          {msg.read ? 'قرأ' : 'أُرسل'}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )})}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Quick Replies always accessible */}
+              <div className="flex gap-2 px-4 py-2 overflow-x-auto no-scrollbar border-t border-white/5 bg-[#0a0a0a]/50 min-w-0 w-full shrink-0">
+                {QUICK_REPLIES.map((reply, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleSendMessage(undefined, reply)}
+                    className="shrink-0 px-3 py-1.5 bg-white/5 hover:bg-brand-green/10 hover:text-brand-green border border-white/10 rounded-full text-xs font-bold transition-all whitespace-nowrap"
+                  >
+                    {reply}
+                  </button>
+                ))}
+              </div>
+
+              <form onSubmit={handleSendMessage} className={`p-4 md:p-6 border-t border-white/10 flex gap-2 md:gap-4 bg-[#0a0a0a]/90 backdrop-blur-xl shrink-0 ${isWidget ? '' : 'pb-24 md:pb-6'}`}>
+                <div className="flex items-center">
+                  <label className="p-2 md:p-3 bg-white/5 hover:bg-white/10 rounded-xl md:rounded-2xl cursor-pointer transition-all text-white/40 hover:text-white">
+                    {uploading ? <Loader2 className="animate-spin" size={18} /> : <ImageIcon size={18} />}
+                    <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} disabled={uploading} />
+                  </label>
+                </div>
+                <div className="flex-1 relative min-w-0">
+                  <input
+                    type="text"
+                    placeholder="اكتب رسالتك..."
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl md:rounded-2xl py-2 md:py-3 px-4 md:px-6 text-base outline-none focus:border-brand-green/50 focus:bg-white/10 transition-all"
+                    dir="auto"
+                  />
+                </div>
+                <button type="submit" disabled={!newMessage.trim() && !uploading} className="shrink-0 min-w-[40px] w-10 h-10 md:min-w-[48px] md:w-12 md:h-12 flex items-center justify-center bg-brand-green text-white rounded-xl md:rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-lg shadow-brand-green/20 disabled:opacity-50 disabled:pointer-events-none">
+                  <Send size={18} className="rtl:-scale-x-100" />
+                </button>
+              </form>
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center space-y-4 text-white/20">
+              <MessageSquare size={64} />
+              <p className="font-bold">اختر محادثة للبدء</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

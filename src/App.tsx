@@ -1,0 +1,150 @@
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { Toaster } from 'sonner';
+import { BackgroundSlider } from './components/BackgroundSlider';
+import Header from './components/Header';
+import MobileNav from './components/MobileNav';
+import AgreementModal from './components/AgreementModal';
+import Home from './pages/Home';
+import Search from './pages/Search';
+import PostAd from './pages/PostAd';
+import Login from './pages/Login';
+import AdDetails from './pages/AdDetails';
+import Profile from './pages/Profile';
+import Messages from './pages/Messages';
+import Admin from './pages/Admin';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import FloatingChatBubble from './components/FloatingChatBubble';
+import { useAuth } from './hooks/useAuth';
+import { AuthProvider } from './context/AuthContext';
+import { LoadingScreen } from './components/LoadingScreen';
+import { SecurityMonitor } from './components/SecurityMonitor';
+import { securityService, SecurityEvent } from './services/securityService';
+import { ShieldAlert } from 'lucide-react';
+import { toast } from 'sonner';
+
+function AppContent() {
+  const isWidget = new URLSearchParams(window.location.search).get('widget') === 'true';
+  const { loading, isAdmin, user } = useAuth();
+
+  // Master Admin Real-time Security Alerts
+  React.useEffect(() => {
+    if (user?.email === "dalinadjib1990@gmail.com") {
+      const unsubscribe = securityService.subscribeToAlerts((events) => {
+        const latestEvent = events[0];
+        if (latestEvent && latestEvent.timestamp) {
+           // Only show toast if event is very recent (last 30 seconds)
+           const eventTime = latestEvent.timestamp.toDate().getTime();
+           const now = Date.now();
+           if (now - eventTime < 30000) {
+              toast.error(`تنبيه أمني عاجل: ${latestEvent.description}`, {
+                description: `المستخدم: ${latestEvent.userEmail} | المسار: ${latestEvent.path}`,
+                duration: 10000,
+                icon: <ShieldAlert size={20} className="text-brand-red animate-pulse" />
+              });
+           }
+        }
+      });
+      return () => unsubscribe();
+    }
+  }, [user]);
+
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  return (
+    <Router>
+      <BackgroundSlider />
+      <div className="min-h-screen flex flex-col w-full text-white bg-transparent" dir="rtl">
+        <SecurityMonitor />
+        <AgreementModal />
+        {!isWidget && <Header />}
+        <main className={`flex-1 ${isWidget ? 'pb-0' : 'pb-20 md:pb-0'} w-full`}>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/search" element={<Search />} />
+            <Route path="/post" element={<PostAd />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/ad/:id" element={<AdDetails />} />
+            <Route path="/profile" element={<Profile />} />
+            <Route path="/messages" element={<Messages />} />
+            <Route path="/admin" element={<Admin />} />
+            <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+          </Routes>
+        </main>
+        {!isWidget && <FloatingChatBubble />}
+        {!isWidget && <MobileNav />}
+        {!isWidget && (
+<footer className="bg-black/40 backdrop-blur-md border-t border-white/10 py-12 hidden md:block">
+          <div className="max-w-7xl mx-auto px-4 grid grid-cols-1 md:grid-cols-4 gap-12">
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-brand-green rounded-lg flex items-center justify-center">
+                  <span className="text-white font-bold">M</span>
+                </div>
+                <span className="text-lg font-black tracking-tighter">
+                  MARKET<span className="text-brand-green">AUTO</span><span className="text-brand-red">DZ</span>
+                </span>
+              </div>
+              <p className="text-sm text-white/40 leading-relaxed">
+                المنصة الجزائرية الأولى لبيع وشراء السيارات باحترافية وسهولة. نحن نربط البائعين والمشترين في كل أنحاء الوطن.
+              </p>
+            </div>
+            
+            <div>
+              <h4 className="font-bold mb-6">روابط سريعة</h4>
+              <ul className="space-y-3 text-sm text-white/40">
+                {isAdmin && (
+                  <li><Link to="/admin" className="text-brand-green font-black">لوحة المسؤول (Admin)</Link></li>
+                )}
+                <li><Link to="/" className="hover:text-brand-green transition-colors">عن المنصة</Link></li>
+                <li><a href="#" className="hover:text-brand-green transition-colors">شروط الاستخدام</a></li>
+                <li><Link to="/privacy-policy" className="hover:text-brand-green transition-colors">سياسة الخصوصية</Link></li>
+                <li><a href="#" className="hover:text-brand-green transition-colors">اتصل بنا</a></li>
+              </ul>
+            </div>
+
+            <div>
+              <h4 className="font-bold mb-6">الماركات الشهيرة</h4>
+              <ul className="space-y-3 text-sm text-white/40">
+                <li><a href="#" className="hover:text-brand-green transition-colors">Renault</a></li>
+                <li><a href="#" className="hover:text-brand-green transition-colors">Hyundai</a></li>
+                <li><a href="#" className="hover:text-brand-green transition-colors">Volkswagen</a></li>
+                <li><a href="#" className="hover:text-brand-green transition-colors">Dacia</a></li>
+              </ul>
+            </div>
+
+            <div>
+              <h4 className="font-bold mb-6">تابعنا</h4>
+              <div className="flex gap-4">
+                <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center hover:bg-brand-green transition-colors cursor-pointer">
+                  <span className="text-xs font-bold">FB</span>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center hover:bg-brand-green transition-colors cursor-pointer">
+                  <span className="text-xs font-bold">IG</span>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center hover:bg-brand-green transition-colors cursor-pointer">
+                  <span className="text-xs font-bold">YT</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="max-w-7xl mx-auto px-4 mt-12 pt-8 border-t border-white/5 text-center text-xs text-white/20">
+            © 2026 Market Auto DZ. جميع الحقوق محفوظة. v1.0.5 | صنع بكل فخر في الجزائر 🇩🇿
+          </div>
+        </footer>
+        )}
+        <Toaster position="top-center" richColors />
+      </div>
+    </Router>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
+}

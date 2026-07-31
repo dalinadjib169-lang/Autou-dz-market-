@@ -1,0 +1,845 @@
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { doc, getDoc, getDocs, collection, addDoc, setDoc, serverTimestamp, query, where, onSnapshot, updateDoc, deleteDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { useAuth } from '../hooks/useAuth';
+import { Ad, Comment } from '../types';
+import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
+import { 
+  MapPin, Calendar, Gauge, CheckCircle2, Phone, MessageSquare, 
+  Share2, Heart, ChevronLeft, ChevronRight, User, Star, ShieldCheck,
+  Zap, Info, Trash2, Edit2, Activity, X, Search, Droplets, CheckCircle,
+  AlertTriangle, Thermometer, Bot, Loader2, LineChart as LineChartIcon
+} from 'lucide-react';
+import { cn, generateId } from '../lib/utils';
+import { toast } from 'sonner';
+import { motion } from 'motion/react';
+import { 
+  Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip
+} from 'recharts';
+import MarketAnalysisPopup from '../components/MarketAnalysisPopup';
+import Markdown from 'react-markdown';
+import rehypeRaw from 'rehype-raw';
+
+export default function AdDetails() {
+  const { id } = useParams();
+  const { user, profile } = useAuth();
+  const navigate = useNavigate();
+  const [ad, setAd] = useState<Ad | null>(null);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [newComment, setNewComment] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [currentImage, setCurrentImage] = useState(0);
+  const [showPhone, setShowPhone] = useState(false);
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editCommentText, setEditCommentText] = useState('');
+  const [showZoom, setShowZoom] = useState(false);
+  const [showMarketAnalysis, setShowMarketAnalysis] = useState(false);
+  const [assessingCar, setAssessingCar] = useState(false);
+  const [aiAssessmentResult, setAiAssessmentResult] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    const fetchAd = async () => {
+      if (!id) return;
+      try {
+        const docSnap = await getDoc(doc(db, 'ads', id));
+        if (docSnap.exists()) {
+          setAd({ id: docSnap.id, ...docSnap.data() } as Ad);
+        } else {
+          toast.error('الإعلان غير موجود');
+          navigate('/');
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.GET, `ads/${id}`);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchAd();
+
+    const q = query(collection(db, 'comments'), where('adId', '==', id));
+    const unsubComments = onSnapshot(q, (snap) => {
+      setComments(snap.docs.map(d => ({ id: d.id, ...d.data() } as Comment)));
+    });
+
+    return () => unsubComments();
+  }, [id]);
+
+  const handleAddComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !id || !newComment.trim()) return;
+    try {
+      await addDoc(collection(db, 'comments'), {
+        adId: id,
+        userId: user.uid,
+        userName: `${profile?.firstName} ${profile?.lastName}`,
+        text: newComment,
+        createdAt: serverTimestamp(),
+      });
+      setNewComment('');
+      toast.success('تم إضافة التعليق');
+    } catch (error) {
+      toast.error('فشل إضافة التعليق');
+    }
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    if (!window.confirm('هل أنت متأكد من حذف هذا التعليق؟')) return;
+    try {
+      await setDoc(doc(db, 'comments', commentId), { deleted: true, text: 'تم حذف هذا التعليق' }, { merge: true });
+      toast.success('تم حذف التعليق');
+    } catch (error) {
+      toast.error('فشل حذف التعليق');
+    }
+  };
+
+  const handleEditComment = async (commentId: string) => {
+    if (!editCommentText.trim()) return;
+    try {
+      await setDoc(doc(db, 'comments', commentId), { text: editCommentText, edited: true }, { merge: true });
+      setEditingCommentId(null);
+      setEditCommentText('');
+      toast.success('تم تعديل التعليق');
+    } catch (error) {
+      toast.error('فشل تعديل التعليق');
+    }
+  };
+
+  const handleMarkAsSold = async () => {
+    if (!ad || !user || (user.uid !== ad.userId && profile?.role !== 'admin')) return;
+    try {
+      await updateDoc(doc(db, 'ads', ad.id), { status: 'sold' });
+      setAd({ ...ad, status: 'sold' });
+      toast.success('تم تحديد السيارة كمباعة (Vendu)');
+    } catch (error) {
+      toast.error('فشل تحديث الحالة');
+    }
+  };
+
+  const handleDeleteAd = async () => {
+    if (!ad || !user || (user.uid !== ad.userId && profile?.role !== 'admin')) return;
+    if (!window.confirm('هل أنت متأكد من حذف هذا الإعلان نهائياً؟')) return;
+    try {
+      await deleteDoc(doc(db, 'ads', ad.id));
+      toast.success('تم حذف الإعلان');
+      navigate('/');
+    } catch (error) {
+      toast.error('فشل حذف الإعلان');
+    }
+  };
+
+  const handleAIAssessment = async () => {
+    if (!ad) return;
+    setAssessingCar(true);
+    const loadingToast = toast.loading('الخبير الآلي يحلل السيارة والسوق...');
+    try {
+      const response = await fetch('/api/gemini/assess-car', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adDetails: ad,
+          role: 'viewer',
+          userMessage: 'أعطنا رأيك كخبير محايد في هذه السيارة وهذا السعر بناءً على خبرتك في السوق الجزائري، وحدد سعراً عادلاً.',
+        })
+      });
+
+      if (!response.ok) {
+        let errMsg = 'فشل التقييم';
+        try {
+          const errData = await response.json();
+          if (errData.error) errMsg = errData.error;
+        } catch(e) {}
+        throw new Error(errMsg);
+      }
+      const data = await response.json();
+      
+      setAiAssessmentResult(data.reply);
+      toast.success('تم التقييم بنجاح', { id: loadingToast });
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error.message || 'حدث خطأ أثناء الاتصال بالخبير الآلي', { id: loadingToast });
+    } finally {
+      setAssessingCar(false);
+    }
+  };
+
+  const startChat = async () => {
+    if (!ad || !user) {
+      toast.error('يرجى تسجيل الدخول للمراسلة');
+      navigate('/login');
+      return;
+    }
+    if (!ad || !ad.userId) {
+      console.log('Ad data missing or userId missing:', ad);
+      toast.error('بيانات البائع غير مكتملة');
+      return;
+    }
+
+    if (user.uid === ad.userId) {
+      toast.error('لا يمكنك مراسلة نفسك');
+      return;
+    }
+
+    console.log('Starting chat. Current User:', user.uid, 'Ad Owner:', ad.userId);
+    
+    try {
+      // Fetch all chats for the user
+      const chatQuery = query(
+        collection(db, 'chats'),
+        where('participants', 'array-contains', user.uid)
+      );
+      
+      const chatSnap = await getDocs(chatQuery);
+      
+      // Find chat for this specific ad and specific seller
+      const existingChat = chatSnap.docs.find(doc => {
+        const data = doc.data();
+        return data.adId === id && data.participants?.includes(ad.userId);
+      });
+      
+      let chatId = '';
+      
+      if (!existingChat) {
+        // Generate clean names
+        const getCleanName = (p: any, u: any, fallback: string) => {
+          if (p && (p.firstName || p.lastName)) {
+            return `${p.firstName || ''} ${p.lastName || ''}`.trim();
+          }
+          return u.displayName || u.email?.split('@')[0] || fallback;
+        };
+
+        const finalBuyerName = getCleanName(profile, user, 'مشتري');
+        
+        const newChatRef = await addDoc(collection(db, 'chats'), {
+          participants: [user.uid, ad.userId],
+          adId: id,
+          adTitle: ad.title,
+          adPrice: ad.price,
+          adSamouni: ad.samouni || null,
+          adWilaya: ad.wilaya,
+          adImage: ad.images[0] || null,
+          buyerId: user.uid,
+          sellerId: ad.userId,
+          buyerName: finalBuyerName,
+          sellerName: ad.sellerName || 'بائع',
+          buyerEmail: user.email,
+          sellerEmail: ad.sellerEmail || '', // Store emails for backup identification
+          updatedAt: serverTimestamp(),
+          lastMessage: 'هل السيارة لا تزال متوفرة؟',
+          lastSenderId: user.uid,
+          unreadCount: {
+            [ad.userId]: 1
+          }
+        });
+        chatId = newChatRef.id;
+
+        await addDoc(collection(db, 'messages'), {
+          chatId: chatId,
+          senderId: user.uid,
+          text: 'هل السيارة لا تزال متوفرة؟',
+          createdAt: serverTimestamp(),
+        });
+        toast.success('تم بدء محادثة حقيقية');
+      } else {
+        chatId = existingChat.id;
+      }
+      
+      window.dispatchEvent(new CustomEvent('open-chat-bubble', { detail: { chatId } }));
+    } catch (error: any) {
+      console.error('Start Chat Error:', error);
+      if (error.message?.includes('Missing or insufficient permissions')) {
+        toast.error('خطأ في الصلاحيات. يرجى التأكد من تسجيل الدخول.');
+      } else {
+        toast.error('فشل بدء المحادثة. يرجى المحاولة لاحقاً.');
+      }
+    }
+  };
+
+  if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="w-12 h-12 border-4 border-brand-green border-t-transparent rounded-full animate-spin"></div></div>;
+  if (!ad) return null;
+
+  let displayAssessmentText = aiAssessmentResult || '';
+  let assessmentChartData: any = null;
+
+  if (aiAssessmentResult) {
+    const jsonMatch = aiAssessmentResult.match(/```json\n([\s\S]*?)\n```/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[1]);
+        if (parsed.repairCosts) {
+          assessmentChartData = parsed.repairCosts;
+        }
+        displayAssessmentText = aiAssessmentResult.replace(jsonMatch[0], '');
+      } catch (e) {
+        console.error("Failed to parse chart data", e);
+      }
+    }
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 py-8 space-y-12">
+      {/* Fullscreen Image Zoom */}
+      {showZoom && (
+        <div 
+          className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 md:p-12"
+          onClick={() => setShowZoom(false)}
+        >
+          <button className="absolute top-8 right-8 text-white/60 hover:text-white transition-colors">
+            <X size={32} />
+          </button>
+          <img 
+            src={ad.images[currentImage]} 
+            alt={ad.title} 
+            className="max-w-full max-h-full object-contain rounded-2xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
+        {/* Left Column: Images and Info */}
+        <div className="lg:col-span-2 space-y-8">
+          {/* Image Gallery */}
+          <div className="space-y-4">
+            <div className="relative aspect-video rounded-[32px] overflow-hidden glass-card group cursor-zoom-in" onClick={() => setShowZoom(true)}>
+              <img src={ad.images[currentImage]} alt={ad.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+              <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <div className="bg-white/10 backdrop-blur-md p-4 rounded-full border border-white/20">
+                  <Search className="text-white" size={24} />
+                </div>
+              </div>
+              <div className="absolute inset-0 flex items-center justify-between px-4 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                <button 
+                  onClick={() => setCurrentImage(prev => prev > 0 ? prev - 1 : ad.images.length - 1)}
+                  className="w-12 h-12 bg-black/50 backdrop-blur-md rounded-full flex items-center justify-center text-white hover:bg-brand-green transition-colors"
+                >
+                  <ChevronRight size={24} />
+                </button>
+                <button 
+                  onClick={() => setCurrentImage(prev => prev < ad.images.length - 1 ? prev + 1 : 0)}
+                  className="w-12 h-12 bg-black/50 backdrop-blur-md rounded-full flex items-center justify-center text-white hover:bg-brand-green transition-colors"
+                >
+                  <ChevronLeft size={24} />
+                </button>
+              </div>
+            </div>
+            <div className="flex gap-4 overflow-x-auto pb-2 no-scrollbar">
+              {ad.images.map((img, idx) => (
+                <button 
+                  key={idx} 
+                  onClick={() => setCurrentImage(idx)}
+                  className={cn(
+                    "w-24 h-24 rounded-2xl overflow-hidden shrink-0 border-2 transition-all",
+                    currentImage === idx ? "border-brand-green scale-105" : "border-transparent opacity-50 hover:opacity-100"
+                  )}
+                >
+                  <img src={img} alt="Thumbnail" className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Ad Details */}
+          <div className={cn(
+            "glass-card p-8 space-y-8 border-2",
+            ad.template === 'commercial' ? 'border-brand-green/20 bg-brand-green/5' :
+            ad.template === 'attractive' ? 'border-brand-red/20 bg-brand-red/5' :
+            ad.template === 'special' ? 'border-amber-500/20 bg-amber-500/5' :
+            'border-white/5 bg-white/5'
+          )}>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-2 text-right">
+                <div className="flex items-center gap-3 justify-end">
+                  {ad.status === 'sold' && (
+                    <span className="px-4 py-1.5 bg-brand-red text-white text-xs font-black rounded-full animate-pulse shadow-lg shadow-brand-red/20 uppercase tracking-widest">
+                      Vendu / تم البيع
+                    </span>
+                  )}
+                  <h1 className="text-3xl font-black tracking-tighter">{ad.title}</h1>
+                </div>
+                <div className="flex items-center gap-4 text-white/40 text-sm justify-end">
+                  <span className="flex items-center gap-1"><Zap size={14} /> {ad.views} مشاهدة</span>
+                  <span className="flex items-center gap-1"><Calendar size={14} /> {ad.createdAt?.toDate().toLocaleDateString('fr-FR')}</span>
+                  <span className="flex items-center gap-1"><MapPin size={14} /> {ad.wilaya}</span>
+                </div>
+              </div>
+              <div className="text-right space-y-2">
+                <p className="text-4xl font-black text-brand-green">{ad.price.toLocaleString()} دج</p>
+                {ad.samouni && (
+                  <p className="text-xl font-bold text-brand-red">ساموني: {ad.samouni.toLocaleString()} دج</p>
+                )}
+                {ad.isNegotiable && <span className="text-xs bg-brand-red/10 text-brand-red px-2 py-1 rounded font-bold">قابل للتفاوض</span>}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
+              <div className="p-4 rounded-2xl bg-white/5 border border-white/5 space-y-1">
+                <p className="text-[10px] text-white/40 uppercase font-bold">الماركة</p>
+                <p className="font-bold">{ad.brand}</p>
+              </div>
+              <div className="p-4 rounded-2xl bg-white/5 border border-white/5 space-y-1">
+                <p className="text-[10px] text-white/40 uppercase font-bold">الموديل</p>
+                <p className="font-bold">{ad.model}</p>
+              </div>
+              <div className="p-4 rounded-2xl bg-white/5 border border-white/5 space-y-1">
+                <p className="text-[10px] text-white/40 uppercase font-bold">السنة</p>
+                <p className="font-bold">{ad.year}</p>
+              </div>
+              <div className="p-4 rounded-2xl bg-white/5 border border-white/5 space-y-1">
+                <p className="text-[10px] text-white/40 uppercase font-bold">المسافة</p>
+                <p className="font-bold">{ad.mileage?.toLocaleString() || '---'} كم</p>
+              </div>
+              <div className="p-4 rounded-2xl bg-white/5 border border-white/5 space-y-1">
+                <p className="text-[10px] text-white/40 uppercase font-bold">المحرك</p>
+                <p className="font-bold">{ad.engine || '---'}</p>
+              </div>
+              <div className="p-4 rounded-2xl bg-white/5 border border-white/5 space-y-1">
+                <p className="text-[10px] text-white/40 uppercase font-bold">علبة السرعة</p>
+                <p className="font-bold">{ad.gearbox || '---'}</p>
+              </div>
+              <div className="p-4 rounded-2xl bg-white/5 border border-white/5 space-y-1">
+                <p className="text-[10px] text-white/40 uppercase font-bold">نوع الطاقة</p>
+                <p className="font-bold">{ad.fuelType}</p>
+              </div>
+              <div className="p-4 rounded-2xl bg-white/5 border border-white/5 space-y-1">
+                <p className="text-[10px] text-white/40 uppercase font-bold">الحالة العامة</p>
+                <p className="font-bold">{ad.condition}</p>
+              </div>
+            </div>
+
+            {/* Vehicle Condition Analysis */}
+            <div className="space-y-6 pt-4">
+              <h3 className="text-xl font-bold flex items-center gap-2 justify-end">
+                تحليل حالة السيارة
+                <Activity size={20} className="text-brand-green" />
+              </h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                {/* Radar Chart */}
+                <div className="h-64 glass-card p-4 flex items-center justify-center bg-gradient-to-br from-white/5 to-transparent relative overflow-hidden">
+                  <div className="absolute inset-0 bg-brand-green/5 animate-pulse"></div>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RadarChart cx="50%" cy="50%" outerRadius="80%" data={[
+                      { subject: 'المحرك', A: ad.engineRating || 10, fullMark: 10 },
+                      { subject: 'التعليق', A: ad.suspensionRating || 10, fullMark: 10 },
+                      { subject: 'الهيكل', A: ad.bodyRating || 10, fullMark: 10 },
+                      { subject: 'الصالون', A: ad.interiorRating || 10, fullMark: 10 },
+                      { subject: 'العجلات', A: ad.tiresRating || 10, fullMark: 10 },
+                    ]}>
+                      <PolarGrid stroke="#ffffff10" />
+                      <PolarAngleAxis dataKey="subject" tick={{ fill: '#ffffff60', fontSize: 10, fontWeight: 'bold' }} />
+                      <Radar
+                        name="Condition"
+                        dataKey="A"
+                        stroke="#10b981"
+                        fill="url(#radarGradient)"
+                        fillOpacity={0.7}
+                      />
+                      <defs>
+                        <linearGradient id="radarGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.9}/>
+                          <stop offset="50%" stopColor="#3b82f6" stopOpacity={0.9}/>
+                          <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.9}/>
+                        </linearGradient>
+                      </defs>
+                    </RadarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Percentage Bars */}
+                <div className="space-y-6">
+                  {[
+                    { label: 'المحرك', value: ad.engineRating || 10, color: 'from-emerald-400 via-teal-500 to-cyan-600' },
+                    { label: 'جهاز التعليق', value: ad.suspensionRating || 10, color: 'from-blue-400 via-indigo-500 to-violet-600' },
+                    { label: 'الهيكل', value: ad.bodyRating || 10, color: 'from-amber-400 via-orange-500 to-red-600' },
+                    { label: 'الصالون', value: ad.interiorRating || 10, color: 'from-fuchsia-400 via-purple-500 to-violet-600' },
+                    { label: 'العجلات', value: ad.tiresRating || 10, color: 'from-rose-400 via-red-500 to-orange-600' },
+                  ].map((item, idx) => (
+                    <div key={idx} className="space-y-2">
+                      <div className="flex justify-between items-center text-xs font-bold">
+                        <div className="flex items-center gap-2">
+                          <span className={cn(
+                            "px-2 py-0.5 rounded-md text-[10px] font-black shadow-lg",
+                            item.value >= 8 ? "bg-emerald-500/20 text-emerald-400" :
+                            item.value >= 5 ? "bg-amber-500/20 text-amber-400" : "bg-rose-500/20 text-rose-400"
+                          )}>
+                            {item.value * 10}%
+                          </span>
+                        </div>
+                        <span className="text-white/60">{item.label}</span>
+                      </div>
+                      <div className="h-4 bg-white/5 rounded-full overflow-hidden border border-white/5 p-0.5 shadow-inner">
+                        <motion.div 
+                          initial={{ width: 0 }}
+                          animate={{ width: `${item.value * 10}%` }}
+                          transition={{ duration: 1.5, ease: "easeOut" }}
+                          className={cn(
+                            "h-full rounded-full bg-gradient-to-l relative group",
+                            item.color
+                          )}
+                        >
+                          <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer"></div>
+                        </motion.div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Engine Health Display */}
+            <div className="space-y-6 pt-4">
+              <h3 className="text-xl font-bold flex items-center gap-2 justify-end">
+                صحة المحرك والأداء
+                <ShieldCheck size={20} className="text-brand-green" />
+              </h3>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Oil Consumption Display */}
+                <div className="p-8 rounded-[2.5rem] bg-white/5 border border-white/5 space-y-6 relative overflow-hidden group shadow-2xl">
+                  <div className="absolute top-0 right-0 w-48 h-48 bg-blue-500/5 rounded-full blur-[80px] -mr-24 -mt-24 transition-all group-hover:bg-blue-500/10"></div>
+                  <div className="flex items-center justify-between relative z-10">
+                    <div className="flex flex-col">
+                       <span className="text-xl font-black text-white/90">حالة الزيت</span>
+                       <span className="text-[10px] text-white/40 font-bold uppercase tracking-[0.2em]">Oil System Status</span>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 shadow-inner">
+                       <Droplets size={32} className={cn(
+                         ad.oilConsumption === 'much' ? "text-brand-red animate-pulse" : 
+                         ad.oilConsumption === 'little' ? "text-amber-500" : "text-blue-400"
+                       )} />
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 relative z-10">
+                    <div className="flex justify-between items-end">
+                      <span className={cn(
+                        "text-2xl font-black italic tracking-tighter",
+                        ad.oilConsumption === 'much' ? "text-brand-red" : 
+                        ad.oilConsumption === 'little' ? "text-amber-500" : "text-brand-green"
+                      )}>
+                        {ad.oilConsumption === 'much' ? "ينقص بزاف" : 
+                         ad.oilConsumption === 'little' ? "ينقص شوي" : 
+                         "نظيف تماماً"}
+                      </span>
+                      {ad.oilConsumption !== 'none' && (
+                        <span className="text-white/40 text-sm font-bold">{ad.oilConsumptionPercentage}%</span>
+                      )}
+                    </div>
+                    
+                    <div className="h-4 bg-white/5 rounded-full overflow-hidden border border-white/10 p-1 flex gap-1">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: ad.oilConsumption === 'none' ? '100%' : `${100 - (ad.oilConsumptionPercentage || 0)}%` }}
+                        className={cn(
+                          "h-full rounded-full transition-all duration-1000",
+                          ad.oilConsumption === 'none' ? "bg-brand-green" : 
+                          ad.oilConsumption === 'little' ? "bg-amber-500" : "bg-brand-red"
+                        )} 
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="pt-2 flex items-center gap-3 relative z-10">
+                    <div className="flex-1 h-[1px] bg-white/10"></div>
+                    <p className="text-[10px] font-black text-white/20 uppercase">
+                      {ad.oilConsumption === 'none' ? "SAFE OPERATING LEVEL" : "WARNING: CHECK PERIODICALLY"}
+                    </p>
+                    <div className="flex-1 h-[1px] bg-white/10"></div>
+                  </div>
+                </div>
+
+                {/* Overheating Display */}
+                <div className="p-8 rounded-[2.5rem] bg-white/5 border border-white/5 space-y-6 relative overflow-hidden group shadow-2xl">
+                  <div className="absolute top-0 left-0 w-48 h-48 bg-orange-500/5 rounded-full blur-[80px] -ml-24 -mt-24 transition-all group-hover:bg-orange-500/10"></div>
+                  <div className="flex items-center justify-between relative z-10">
+                    <div className="flex flex-col">
+                       <span className="text-xl font-black text-white/90">حرارة المحرك</span>
+                       <span className="text-[10px] text-white/40 font-bold uppercase tracking-[0.2em]">Thermostat Gauge</span>
+                    </div>
+                    <div className={cn(
+                      "p-4 rounded-2xl border shadow-inner transition-colors",
+                      ad.overheats ? "bg-brand-red/10 border-brand-red/20" : "bg-brand-green/10 border-brand-green/20"
+                    )}>
+                       <Gauge size={32} className={ad.overheats ? "text-brand-red animate-bounce" : "text-brand-green"} />
+                    </div>
+                  </div>
+
+                  <div className="relative z-10 space-y-4">
+                    <div className="flex justify-between items-end">
+                      <span className={cn(
+                        "text-2xl font-black italic tracking-tighter",
+                        ad.overheats ? "text-brand-red animate-pulse" : "text-brand-green"
+                      )}>
+                        {ad.overheats ? "حرارة مرتفعة" : "حرارة مستقرة"}
+                      </span>
+                      <Thermometer size={20} className={ad.overheats ? "text-brand-red" : "text-white/20"} />
+                    </div>
+
+                    <div className="flex gap-2">
+                       {[...Array(12)].map((_, i) => (
+                         <div 
+                           key={i} 
+                           className={cn(
+                             "flex-1 h-3 rounded-sm transition-all duration-300",
+                             ad.overheats 
+                               ? (i < 8 ? "bg-orange-500/30" : "bg-brand-red shadow-[0_0_10px_rgba(239,68,68,0.5)]") 
+                               : (i < 4 ? "bg-brand-green" : "bg-white/5")
+                           )}
+                         />
+                       ))}
+                    </div>
+                  </div>
+
+                  <div className="pt-2 flex items-center gap-3 relative z-10">
+                    <div className="flex-1 h-[1px] bg-white/10"></div>
+                    <p className="text-[10px] font-black text-white/20 uppercase">
+                      {ad.overheats ? "CRITICAL SYSTEM TEMPERATURE" : "OPTIMAL THERMAL PERFORMANCE"}
+                    </p>
+                    <div className="flex-1 h-[1px] bg-white/10"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="text-xl font-bold">الوصف</h3>
+              <p className="text-white/60 leading-relaxed whitespace-pre-wrap">{ad.description}</p>
+            </div>
+
+            {ad.repairs.length > 0 && (
+              <div className="space-y-4">
+                <h3 className="text-xl font-bold">العوادات (Réparations)</h3>
+                <div className="flex flex-wrap gap-2">
+                  {ad.repairs.map(r => (
+                    <span key={r} className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-sm text-white/60">
+                      {r}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Comments Section */}
+          <div className="glass-card p-8 space-y-8">
+            <h3 className="text-xl font-bold">التعليقات ({comments.length})</h3>
+            
+            <form onSubmit={handleAddComment} className="flex gap-4">
+              <input 
+                type="text" 
+                placeholder="اكتب تعليقك هنا..." 
+                value={newComment}
+                onChange={(e) => setNewComment(e.target.value)}
+                className="input-field flex-1"
+              />
+              <button type="submit" className="btn-primary !py-2">إرسال</button>
+            </form>
+
+            <div className="space-y-6">
+              {comments.map(comment => (
+                <div key={comment.id} className="flex gap-4 group">
+                  <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center shrink-0">
+                    <User size={20} className="text-white/40" />
+                  </div>
+                  <div className="space-y-1 flex-1">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm">{comment.userName}</span>
+                        <span className="text-[10px] text-white/20">{comment.createdAt?.seconds ? new Date(comment.createdAt.seconds * 1000).toLocaleDateString() : ''}</span>
+                        {comment.edited && !comment.deleted && <span className="text-[8px] text-white/20">(معدل)</span>}
+                      </div>
+                      {user?.uid === comment.userId && !comment.deleted && (
+                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => { setEditingCommentId(comment.id); setEditCommentText(comment.text); }} className="text-white/20 hover:text-white"><Edit2 size={12} /></button>
+                          <button onClick={() => handleDeleteComment(comment.id)} className="text-white/20 hover:text-red-500"><Trash2 size={12} /></button>
+                        </div>
+                      )}
+                    </div>
+                    {editingCommentId === comment.id ? (
+                      <div className="space-y-2 mt-2">
+                        <input 
+                          type="text" 
+                          value={editCommentText} 
+                          onChange={(e) => setEditCommentText(e.target.value)}
+                          className="w-full bg-black/20 border border-white/10 rounded-lg p-2 text-sm outline-none"
+                          autoFocus
+                        />
+                        <div className="flex justify-end gap-2">
+                          <button onClick={() => setEditingCommentId(null)} className="text-xs text-white/40">إلغاء</button>
+                          <button onClick={() => handleEditComment(comment.id)} className="text-xs text-brand-green font-bold">حفظ</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className={cn("text-sm text-white/60", comment.deleted && "italic text-white/20")}>{comment.text}</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column: Seller Info and Actions */}
+        <div className="space-y-6">
+          <div className="glass-card p-8 space-y-8 sticky top-28">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 rounded-2xl bg-brand-green/10 flex items-center justify-center border border-brand-green/20">
+                <User size={32} className="text-brand-green" />
+              </div>
+              <div>
+                <h4 className="font-bold text-lg">{ad.sellerName}</h4>
+                <div className="flex items-center gap-1 text-amber-500">
+                  <Star size={14} fill="currentColor" />
+                  <span className="text-sm font-bold">4.8</span>
+                  <span className="text-xs text-white/20 mr-1">(12 تقييم)</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {(user?.uid === ad.userId || profile?.role === 'admin') && (
+                <div className="grid grid-cols-2 gap-4 pb-4">
+                  <button 
+                    onClick={handleMarkAsSold}
+                    disabled={ad.status === 'sold'}
+                    className={cn(
+                      "flex items-center justify-center gap-2 py-4 rounded-2xl font-black text-sm transition-all border-2",
+                      ad.status === 'sold' 
+                        ? "bg-white/5 border-white/10 text-white/20 cursor-not-allowed" 
+                        : "bg-brand-green/10 border-brand-green/20 text-brand-green hover:bg-brand-green hover:text-white"
+                    )}
+                  >
+                    <CheckCircle size={20} />
+                    {ad.status === 'sold' ? 'تم البيع' : 'تحديد كمباع (Vendu)'}
+                  </button>
+                  <button 
+                    onClick={handleDeleteAd}
+                    className="flex items-center justify-center gap-2 py-4 rounded-2xl bg-brand-red/10 border-2 border-brand-red/20 text-brand-red font-black text-sm hover:bg-brand-red hover:text-white transition-all shadow-lg shadow-brand-red/10"
+                  >
+                    <Trash2 size={20} />
+                    حذف الإعلان نهائياً
+                  </button>
+                </div>
+              )}
+
+              {ad.showPhone ? (
+                <button 
+                  onClick={() => setShowPhone(!showPhone)}
+                  className="w-full btn-primary flex items-center justify-center gap-3"
+                >
+                  <Phone size={20} />
+                  {showPhone ? ad.sellerPhone : 'إظهار رقم الهاتف'}
+                </button>
+              ) : (
+                <button 
+                  disabled
+                  className="w-full py-3 bg-white/5 text-white/40 rounded-xl font-bold flex items-center justify-center gap-3 cursor-not-allowed"
+                >
+                  <Phone size={20} />
+                  الرقم مخفي من قبل البائع
+                </button>
+              )}
+              <button 
+                onClick={startChat}
+                className="w-full btn-secondary flex items-center justify-center gap-3"
+              >
+                <MessageSquare size={20} />
+                مراسلة البائع
+              </button>
+              <button 
+                onClick={handleAIAssessment}
+                disabled={assessingCar}
+                className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-3 hover:scale-105 active:scale-95 transition-all shadow-[0_0_15px_rgba(79,70,229,0.3)] hover:shadow-[0_0_25px_rgba(79,70,229,0.5)] disabled:opacity-50 disabled:pointer-events-none"
+              >
+                {assessingCar ? <Loader2 size={20} className="animate-spin" /> : <Bot size={20} />}
+                تقييم الخبير الآلي للإعلان
+              </button>
+            </div>
+
+            <div className="pt-8 border-t border-white/5 space-y-4">
+              <div className="flex items-center gap-3 text-sm text-white/40">
+                <ShieldCheck size={18} className="text-brand-green" />
+                <span>بائع موثوق لدى المنصة</span>
+              </div>
+              <div className="flex items-center gap-3 text-sm text-white/40">
+                <Info size={18} className="text-brand-green" />
+                <span>تاريخ الانضمام: جانفي 2024</span>
+              </div>
+            </div>
+
+            <div className="flex gap-4">
+              <button className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center gap-2 transition-all">
+                <Heart size={18} />
+                حفظ
+              </button>
+              <button className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center gap-2 transition-all">
+                <Share2 size={18} />
+                مشاركة
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {aiAssessmentResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/90 backdrop-blur-md z-[100]">
+          <div className="bg-[#111] border border-brand-green/50 rounded-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh] shadow-2xl shadow-brand-green/20">
+            <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5">
+              <div className="flex items-center gap-3 text-brand-green">
+                <Bot size={28} />
+                <h3 className="font-bold text-xl md:text-2xl">تحليل الخبير الآلي</h3>
+              </div>
+              <button onClick={() => setAiAssessmentResult(null)} className="p-2 text-white/40 hover:text-white hover:bg-white/10 rounded-xl transition-all">
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="p-6 md:p-8 overflow-y-auto no-scrollbar flex flex-col gap-8">
+              <div className="markdown-body text-white leading-relaxed text-lg md:text-xl font-medium">
+                <Markdown rehypePlugins={[rehypeRaw]}>{displayAssessmentText}</Markdown>
+              </div>
+
+              {assessmentChartData && (
+                <div className="w-full bg-black/40 rounded-2xl p-6 md:p-8 border border-white/10 mt-4 shadow-xl">
+                  <h4 className="text-xl md:text-2xl font-bold text-white/90 mb-8 text-center flex items-center justify-center gap-3">
+                    <span className="w-8 h-[2px] bg-indigo-500 rounded-full"></span>
+                    توقعات مصاريف الصيانة والترقيع
+                    <span className="w-8 h-[2px] bg-indigo-500 rounded-full"></span>
+                  </h4>
+                  <div className="flex flex-col gap-6">
+                    {assessmentChartData.map((item: any, index: number) => {
+                      const maxCost = Math.max(...assessmentChartData.map((d: any) => d.cost));
+                      const percentage = maxCost > 0 ? (item.cost / maxCost) * 100 : 0;
+                      return (
+                        <div key={index} className="flex flex-col gap-2">
+                          <div className="flex justify-between items-center text-sm md:text-base font-bold">
+                            <span className="text-white/80">{item.name}</span>
+                            <span className="text-red-400 font-black tracking-wider bg-red-500/10 px-3 py-1 rounded-lg">
+                              {item.cost.toLocaleString()} دج
+                            </span>
+                          </div>
+                          <div className="w-full bg-white/5 rounded-full h-3 md:h-4 overflow-hidden border border-white/5 flex justify-end">
+                            <div 
+                              className="bg-gradient-to-l from-red-500 to-rose-600 rounded-full h-full transition-all duration-1000 relative overflow-hidden"
+                              style={{ width: `${percentage}%` }}
+                            >
+                               <div className="absolute inset-0 bg-white/20 w-full h-full -translate-x-full animate-shimmer"></div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {ad && <MarketAnalysisPopup isOpen={showMarketAnalysis} onClose={() => setShowMarketAnalysis(false)} ad={ad} />}
+    </div>
+  );
+}

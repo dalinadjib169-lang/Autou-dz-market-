@@ -1,0 +1,136 @@
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Search, MapPin, Car, Star, PlusSquare, Activity } from 'lucide-react';
+import { BRANDS, WILAYAS } from '../constants/data';
+import MarketAnalysisPopup from './MarketAnalysisPopup';
+import { LineChart as LineChartIcon } from 'lucide-react';
+
+export default function Hero() {
+  const [search, setSearch] = useState('');
+  const [showMarketAnalysis, setShowMarketAnalysis] = useState(false);
+  const [brand, setBrand] = useState('');
+  const [wilaya, setWilaya] = useState('');
+  const navigate = useNavigate();
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const params = new URLSearchParams();
+    if (search) params.append('q', search);
+    if (brand) params.append('brand', brand);
+    if (wilaya) params.append('wilaya', wilaya);
+    navigate(`/search?${params.toString()}`);
+  };
+
+  return (
+    <div className="relative min-h-[600px] md:h-[700px] flex items-center justify-center overflow-hidden">
+      {/* Background Image of Dark Car with Glowing Lights */}
+      <div 
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-all duration-1000 scale-105"
+        style={{ backgroundImage: "url('https://images.unsplash.com/photo-1583121274602-3e2820c69888?auto=format&fit=crop&q=80')" }}
+      ></div>
+
+      {/* Gradient overlays designed to keep the car's headlights visible while darkening the text area */}
+      <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-black/40 to-[#0a0a0a]"></div>
+      <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-transparent to-black/90"></div>
+      
+      {/* Animated Glowing Orbs to simulate headlights/mood */}
+      <div className="absolute top-1/3 left-1/4 w-[300px] h-[300px] bg-indigo-500/10 rounded-full blur-[100px] animate-pulse"></div>
+      <div className="absolute top-1/3 right-1/4 w-[300px] h-[300px] bg-red-500/10 rounded-full blur-[100px] animate-pulse delay-700"></div>
+
+      <div className="relative z-10 max-w-5xl w-full px-4 text-center space-y-12">
+        <div className="space-y-6">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 text-xs font-bold tracking-widest uppercase text-brand-green animate-bounce">
+            <Star size={14} fill="currentColor" />
+            المنصة رقم 1 في الجزائر 🇩🇿
+          </div>
+          <h1 className="text-6xl md:text-8xl font-black tracking-tighter leading-tight drop-shadow-2xl">
+            سوق السيارات <br />
+            <span className="text-brand-green drop-shadow-[0_0_15px_rgba(0,102,51,0.5)]">الأول</span> في <span className="text-brand-red drop-shadow-[0_0_15px_rgba(210,16,52,0.5)]">الجزائر</span>
+          </h1>
+          <p className="text-xl md:text-2xl text-white/60 max-w-3xl mx-auto font-medium leading-relaxed">
+            اكتشف آلاف العروض يومياً. بيع وشراء السيارات أصبح أسهل، أسرع، وأكثر أماناً مع <span className="text-white font-bold">Market Auto DZ</span>.
+          </p>
+          <div className="pt-4 flex flex-col md:flex-row flex-wrap items-center justify-center gap-4">
+            <button 
+              onClick={() => navigate('/post')}
+              className="btn-primary !py-4 !px-8 text-xl shadow-[0_0_30px_rgba(0,102,51,0.3)] hover:scale-105 transition-all flex items-center gap-3"
+            >
+              <PlusSquare size={24} />
+              انشر إعلانك الآن مجاناً
+            </button>
+            
+            <button 
+              onClick={() => setShowMarketAnalysis(true)}
+              className="btn-secondary !bg-emerald-500/10 !border-emerald-500/30 !text-emerald-400 !py-4 !px-8 text-lg shadow-[0_0_30px_rgba(16,185,129,0.2)] hover:scale-105 hover:bg-emerald-500/20 transition-all flex items-center gap-3 backdrop-blur-md"
+            >
+              <LineChartIcon size={24} className="drop-shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+              تحليل السوق
+            </button>
+
+            <a 
+              href="https://chat-gpt-emploi.vercel.app/?fbclid=IwcGRvZgNleHRuA2FlbQIxMQBzcnRjBmFwcF9pZA8yNzUyNTQ2OTI1OTgyNzkAAR6hFdfEel-xLQZmdTOSDcD7SM1700ErYvuHdG75jZf3HaCgN15frINNGicFJQ_aem_wFQP2v-eI0txFtI_BFu_Bg"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-secondary !bg-cyan-500/10 !border-cyan-500/30 !text-cyan-400 !py-4 !px-8 text-lg shadow-[0_0_30px_rgba(34,211,238,0.2)] hover:scale-105 hover:bg-cyan-500/20 transition-all flex items-center gap-3 backdrop-blur-md"
+            >
+              <Activity size={24} className="animate-pulse drop-shadow-[0_0_8px_rgba(34,211,238,0.8)]" />
+              تشخيص سيارتي الذكي
+            </a>
+          </div>
+        </div>
+
+        <form onSubmit={handleSearch} className="glass-card p-3 flex flex-col md:flex-row gap-3 shadow-[0_20px_50px_rgba(0,0,0,0.5)] border-white/10">
+          <div className="flex-1 relative group">
+            <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-brand-green transition-colors" size={22} />
+            <input
+              type="text"
+              placeholder="ابحث عن ماركة، موديل..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-white/5 rounded-xl py-5 pr-14 pl-4 outline-none text-lg border border-transparent focus:border-brand-green/30 transition-all"
+            />
+          </div>
+          
+          <div className="w-full md:w-56 relative group">
+            <Car className="absolute right-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-brand-green transition-colors" size={22} />
+            <select
+              value={brand}
+              onChange={(e) => setBrand(e.target.value)}
+              className="w-full bg-white/5 rounded-xl py-5 pr-14 pl-4 outline-none appearance-none cursor-pointer border border-transparent focus:border-brand-green/30 transition-all"
+            >
+              <option value="" className="bg-[#0a0a0a]">كل الماركات</option>
+              {BRANDS.map(b => <option key={b} value={b} className="bg-[#0a0a0a]">{b}</option>)}
+            </select>
+          </div>
+
+          <div className="w-full md:w-56 relative group">
+            <MapPin className="absolute right-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-brand-green transition-colors" size={22} />
+            <select
+              value={wilaya}
+              onChange={(e) => setWilaya(e.target.value)}
+              className="w-full bg-white/5 rounded-xl py-5 pr-14 pl-4 outline-none appearance-none cursor-pointer border border-transparent focus:border-brand-green/30 transition-all"
+            >
+              <option value="" className="bg-[#0a0a0a]">كل الولايات</option>
+              {WILAYAS.map(w => <option key={w} value={w} className="bg-[#0a0a0a]">{w}</option>)}
+            </select>
+          </div>
+
+          <button type="submit" className="btn-primary flex items-center justify-center gap-3 min-w-[160px] !py-5 text-lg shadow-2xl hover:scale-105 transition-transform">
+            <Search size={22} />
+            بحث سريع
+          </button>
+        </form>
+
+        <div className="flex flex-wrap justify-center gap-4 text-sm text-white/40">
+          <span>الأكثر بحثاً:</span>
+          {['Renault Symbol', 'Hyundai Accent', 'Volkswagen Golf', 'Dacia Stepway'].map(tag => (
+            <button key={tag} onClick={() => { setSearch(tag); }} className="hover:text-brand-green transition-colors">
+              {tag}
+            </button>
+          ))}
+        </div>
+            </div>
+      <MarketAnalysisPopup isOpen={showMarketAnalysis} onClose={() => setShowMarketAnalysis(false)} />
+    </div>
+  );
+}
