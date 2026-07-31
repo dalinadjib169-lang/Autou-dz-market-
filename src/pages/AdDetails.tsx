@@ -701,26 +701,35 @@ export default function AdDetails() {
 
             <div className="space-y-4">
               {(user?.uid === ad.userId || profile?.role === 'admin') && (
-                <div className="grid grid-cols-2 gap-4 pb-4">
+                <div className="flex flex-col gap-3 pb-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <button 
+                      onClick={() => navigate(`/post?edit=${ad.id}`)}
+                      className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-bold text-sm hover:bg-amber-500 hover:text-white transition-all shadow-md"
+                    >
+                      <Edit2 size={18} />
+                      تعديل الإعلان
+                    </button>
+                    <button 
+                      onClick={handleDeleteAd}
+                      className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-brand-red/10 border border-brand-red/30 text-brand-red font-bold text-sm hover:bg-brand-red hover:text-white transition-all shadow-md"
+                    >
+                      <Trash2 size={18} />
+                      حذف الإعلان نهائياً
+                    </button>
+                  </div>
                   <button 
                     onClick={handleMarkAsSold}
                     disabled={ad.status === 'sold'}
                     className={cn(
-                      "flex items-center justify-center gap-2 py-4 rounded-2xl font-black text-sm transition-all border-2",
+                      "w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-sm transition-all border",
                       ad.status === 'sold' 
                         ? "bg-white/5 border-white/10 text-white/20 cursor-not-allowed" 
-                        : "bg-brand-green/10 border-brand-green/20 text-brand-green hover:bg-brand-green hover:text-white"
+                        : "bg-brand-green/10 border-brand-green/30 text-brand-green hover:bg-brand-green hover:text-white"
                     )}
                   >
-                    <CheckCircle size={20} />
-                    {ad.status === 'sold' ? 'تم البيع' : 'تحديد كمباع (Vendu)'}
-                  </button>
-                  <button 
-                    onClick={handleDeleteAd}
-                    className="flex items-center justify-center gap-2 py-4 rounded-2xl bg-brand-red/10 border-2 border-brand-red/20 text-brand-red font-black text-sm hover:bg-brand-red hover:text-white transition-all shadow-lg shadow-brand-red/10"
-                  >
-                    <Trash2 size={20} />
-                    حذف الإعلان نهائياً
+                    <CheckCircle size={18} />
+                    {ad.status === 'sold' ? 'تم البيع (Vendu)' : 'تحديد كمباع (Vendu)'}
                   </button>
                 </div>
               )}

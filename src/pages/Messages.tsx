@@ -87,6 +87,7 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
   const [uploading, setUploading] = useState(false);
   const [assessingCar, setAssessingCar] = useState(false);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  const typingTimeoutRef = React.useRef<any>(null);
   const navigate = useNavigate();
 
   const scrollToBottom = () => {
@@ -194,6 +195,12 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
           const data = change.doc.data();
           if (data.lastMessage && data.updatedAt && data.lastSenderId !== user.uid) {
             playNotificationSound();
+            const senderProfile = profiles[data.lastSenderId];
+            const senderName = senderProfile ? `${senderProfile.firstName || ''} ${senderProfile.lastName || ''}`.trim() : 'المستخدِم';
+            toast.info(`رسالة جديدة من ${senderName}`, {
+              description: data.lastMessage,
+              duration: 4000,
+            });
           }
         }
       });
@@ -265,11 +272,29 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
     }
   }, [activeChat, user, messages.length]);
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setNewMessage(val);
+    if (activeChat && user) {
+      setDoc(doc(db, 'chats', activeChat.id), {
+        [`typing.${user.uid}`]: true
+      }, { merge: true }).catch(() => {});
+
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        setDoc(doc(db, 'chats', activeChat.id), {
+          [`typing.${user.uid}`]: false
+        }, { merge: true }).catch(() => {});
+      }, 2500);
+    }
+  };
+
   const handleSendMessage = async (e?: React.FormEvent, textOverride?: string, imageUrl?: string) => {
     if (e) e.preventDefault();
     const textToSend = textOverride || newMessage;
     if (!user || !activeChat || (!textToSend.trim() && !imageUrl)) return;
     try {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       const otherUid = activeChat.participants?.find(id => id !== user.uid);
       
       await addDoc(collection(db, 'messages'), {
@@ -287,6 +312,7 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
         lastMessage: imageUrl ? '📷 صورة' : textToSend,
         lastSenderId: user.uid,
         updatedAt: serverTimestamp(),
+        [`typing.${user.uid}`]: false,
       };
       
       if (otherUid) {
@@ -740,23 +766,71 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
                           </>
                         )}
                         
-                        {isMe && !msg.deleted && (
-                          <div className="absolute -left-12 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-all flex flex-col justify-center gap-1.5 z-10">
-                            <button onClick={() => { setEditingMessageId(msg.id); setEditText(msg.text); }} className="w-8 h-8 flex items-center justify-center bg-[#18181b] border border-white/10 rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-colors shadow-lg shadow-black/20 transform hover:scale-110"><Edit2 size={13} /></button>
-                            <button onClick={() => handleDeleteMessage(msg.id)} className="w-8 h-8 flex items-center justify-center bg-[#18181b] border border-white/10 rounded-full text-white/60 hover:text-red-400 hover:bg-red-500/10 transition-colors shadow-lg shadow-black/20 transform hover:scale-110"><Trash2 size={13} /></button>
+                        {!msg.deleted && !isAI && (
+                          <div className={cn(
+                            "absolute top-1/2 -translate-y-1/2 flex items-center gap-1.5 z-10 opacity-60 hover:opacity-100 transition-all",
+                            isMe ? "-left-16" : "-right-10"
+                          )}>
+                            {isMe && (
+                              <button 
+                                onClick={() => { setEditingMessageId(msg.id); setEditText(msg.text); }} 
+                                title="تعديل الرسالة"
+                                className="w-7 h-7 flex items-center justify-center bg-[#18181b] border border-white/10 rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-colors shadow-lg"
+                              >
+                                <Edit2 size={12} />
+                              </button>
+                            )}
+                            <button 
+                              onClick={() => handleDeleteMessage(msg.id)} 
+                              title="حذف الرسالة"
+                              className="w-7 h-7 flex items-center justify-center bg-[#18181b] border border-white/10 rounded-full text-white/60 hover:text-red-400 hover:bg-red-500/10 transition-colors shadow-lg"
+                            >
+                              <Trash2 size={12} />
+                            </button>
                           </div>
                         )}
                       </div>
                       
-                      {isMe && (
-                        <div className="text-[11px] text-white/40 font-medium flex items-center gap-1.5 pr-1">
-                          <CheckCircle2 size={12} className={cn(msg.read ? "text-brand-green" : "text-white/30")} />
-                          {msg.read ? 'قرأ' : 'أُرسل'}
+                      {isMe && !msg.deleted && (
+                        <div className="text-[11px] font-medium flex items-center gap-1 pr-1 mt-0.5">
+                          {msg.read ? (
+                            <span className="text-emerald-400 font-bold flex items-center gap-1 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 text-[10px]">
+                              <span>👀</span>
+                              <span>vu</span>
+                            </span>
+                          ) : (
+                            <span className="text-white/40 flex items-center gap-1 text-[10px]">
+                              <CheckCircle2 size={12} className="text-white/30" />
+                              أُرسل
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
                   </div>
                 )})}
+                
+                {(() => {
+                  const otherUid = activeChat?.participants?.find(id => id !== user.uid);
+                  const isOtherTyping = otherUid && (activeChat as any)?.typing?.[otherUid] === true;
+                  if (!isOtherTyping) return null;
+                  return (
+                    <div className="flex items-center gap-2 mb-4 justify-start">
+                      <div className="w-7 h-7 rounded-full bg-brand-green/20 border border-brand-green/30 flex items-center justify-center shrink-0">
+                        <User size={14} className="text-brand-green" />
+                      </div>
+                      <div className="bg-[#27272a] border border-white/10 rounded-2xl rounded-tl-sm px-3.5 py-2 flex items-center gap-2 shadow-lg">
+                        <span className="text-xs text-white/70 font-bold">يكتب الآن</span>
+                        <div className="flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 bg-brand-green rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                          <span className="w-1.5 h-1.5 bg-brand-green rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                          <span className="w-1.5 h-1.5 bg-brand-green rounded-full animate-bounce"></span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <div ref={messagesEndRef} />
               </div>
 
@@ -785,7 +859,7 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
                     type="text"
                     placeholder="اكتب رسالتك..."
                     value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
+                    onChange={handleInputChange}
                     className="w-full bg-white/5 border border-white/10 rounded-xl md:rounded-2xl py-2 md:py-3 px-4 md:px-6 text-base outline-none focus:border-brand-green/50 focus:bg-white/10 transition-all"
                     dir="auto"
                   />

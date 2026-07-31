@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { collection, addDoc, doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../hooks/useAuth';
 import { uploadToCloudinary } from '../lib/cloudinary';
@@ -12,7 +12,11 @@ import { cn } from '../lib/utils';
 export default function PostAd() {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const editId = searchParams.get('edit');
+
   const [loading, setLoading] = useState(false);
+  const [fetchingEditData, setFetchingEditData] = useState(!!editId);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [images, setImages] = useState<string[]>([]);
@@ -48,6 +52,63 @@ export default function PostAd() {
     oilConsumptionPercentage: 0,
     overheats: false,
   });
+
+  useEffect(() => {
+    if (!editId) return;
+    const fetchAdToEdit = async () => {
+      try {
+        const docSnap = await getDoc(doc(db, 'ads', editId));
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (user && data.userId !== user.uid && profile?.role !== 'admin') {
+            toast.error('ليس لديك صلاحية تعديل هذا الإعلان');
+            navigate('/');
+            return;
+          }
+          setFormData({
+            title: data.title || '',
+            description: data.description || '',
+            price: data.price ? String(data.price) : '',
+            samouni: data.samouni ? String(data.samouni) : '',
+            isNegotiable: !!data.isNegotiable,
+            brand: data.brand || '',
+            customBrand: '',
+            model: data.model || '',
+            customModel: '',
+            year: data.year || new Date().getFullYear(),
+            fuelType: data.fuelType || 'بنزين',
+            mileage: data.mileage ? String(data.mileage) : '',
+            engine: data.engine || '',
+            customEngine: '',
+            gearbox: data.gearbox || 'يدوي (Manuelle)',
+            customGearbox: '',
+            condition: data.condition || 'جيدة',
+            interiorRating: data.interiorRating || 10,
+            suspensionRating: data.suspensionRating || 10,
+            tiresRating: data.tiresRating || 10,
+            engineRating: data.engineRating || 10,
+            bodyRating: data.bodyRating || 10,
+            repairs: data.repairs || [],
+            wilaya: data.wilaya || profile?.wilaya || 'الجزائر',
+            showPhone: data.showPhone !== false,
+            template: data.template || 'practical',
+            oilConsumption: data.oilConsumption || 'none',
+            oilConsumptionPercentage: data.oilConsumptionPercentage || 0,
+            overheats: !!data.overheats,
+          });
+          setImages(data.images || []);
+        } else {
+          toast.error('الإعلان غير موجود');
+          navigate('/');
+        }
+      } catch (error) {
+        toast.error('فشل جلب بيانات الإعلان للتعديل');
+      } finally {
+        setFetchingEditData(false);
+      }
+    };
+    fetchAdToEdit();
+  }, [editId, user, profile]);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -114,7 +175,7 @@ export default function PostAd() {
       const sellerName = profile ? `${profile.firstName || ''} ${profile.lastName || ''}`.trim() : '';
       const finalSellerName = sellerName || user.displayName || user.email?.split('@')[0] || 'بائع';
 
-      await addDoc(collection(db, 'ads'), {
+      const adData = {
         ...formData,
         brand: finalBrand,
         model: finalModel,
@@ -137,13 +198,25 @@ export default function PostAd() {
         year: Number(formData.year),
         mileage: formData.mileage ? Number(formData.mileage) : null,
         images,
-        status: 'active',
-        views: 0,
-        createdAt: serverTimestamp(),
-      });
+      };
 
-      toast.success('تم نشر إعلانك بنجاح!');
-      navigate('/');
+      if (editId) {
+        await updateDoc(doc(db, 'ads', editId), {
+          ...adData,
+          updatedAt: serverTimestamp(),
+        });
+        toast.success('تم تعديل الإعلان بنجاح!');
+        navigate(`/ad/${editId}`);
+      } else {
+        const docRef = await addDoc(collection(db, 'ads'), {
+          ...adData,
+          status: 'active',
+          views: 0,
+          createdAt: serverTimestamp(),
+        });
+        toast.success('تم نشر إعلانك بنجاح!');
+        navigate(`/ad/${docRef.id}`);
+      }
     } catch (error) {
       console.error(error);
       toast.error('حدث خطأ أثناء نشر الإعلان');
@@ -163,6 +236,15 @@ export default function PostAd() {
     );
   }
 
+  if (fetchingEditData) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-4">
+        <Loader2 className="animate-spin text-brand-green" size={40} />
+        <p className="text-white/60 font-bold">جاري تحميل بيانات الإعلان للتعديل...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-4xl mx-auto px-4 py-12">
       <div className="text-center mb-12 space-y-6">
@@ -172,8 +254,12 @@ export default function PostAd() {
             اللهم صلي و سلم على سيدنا محمد
           </h3>
         </div>
-        <h1 className="text-4xl font-black tracking-tighter mt-8">أضف إعلان جديد</h1>
-        <p className="text-white/40">أدخل تفاصيل سيارتك بدقة لجذب المشترين</p>
+        <h1 className="text-4xl font-black tracking-tighter mt-8">
+          {editId ? 'تعديل الإعلان' : 'أضف إعلان جديد'}
+        </h1>
+        <p className="text-white/40">
+          {editId ? 'قم بتحديث معلومات سيارتك وحفظ التغييرات' : 'أدخل تفاصيل سيارتك بدقة لجذب المشترين'}
+        </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-12">
@@ -691,12 +777,12 @@ export default function PostAd() {
           {loading ? (
             <>
               <Loader2 className="animate-spin" size={24} />
-              جاري النشر...
+              {editId ? 'جاري التعديل...' : 'جاري النشر...'}
             </>
           ) : (
             <>
               <CheckCircle2 size={24} />
-              نشر الإعلان الآن
+              {editId ? 'حفظ التعديلات' : 'نشر الإعلان الآن'}
             </>
           )}
         </button>
